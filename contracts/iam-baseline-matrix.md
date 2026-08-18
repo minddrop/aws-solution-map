@@ -24,10 +24,11 @@
 | Role Name | Trusted Principal | Allowed Actions | Condition Keys Enforced |
 | :--- | :--- | :--- | :--- |
 | `AWSAccelerator-SecurityAdminRole` | IAM Identity Center / SecOps SSO Group | Full SecOps & Security Hub / KMS Key Admin | `aws:MultiFactorAuthPresent: true`, `aws:PrincipalOrgID` |
-| `AWSAccelerator-NetworkAdminRole` | IAM Identity Center / Network SSO Group | TGW, Direct Connect, Cloud WAN, Route 53 Resolver | `aws:PrincipalOrgID`, `aws:RequestedRegion: [us-east-1, us-west-2]` |
+| `AWSAccelerator-NetworkAdminRole` | IAM Identity Center / Network SSO Group | TGW, Direct Connect, Cloud WAN, Route 53 Profiles | `aws:PrincipalOrgID`, `aws:RequestedRegion: [us-east-1, us-west-2]` |
 | `AWSAccelerator-PipelineOIDC-Role` | GitHub Actions (`token.actions.githubusercontent.com`) | Terraform IaC Plan & Apply | `token.actions.githubusercontent.com:sub: repo:enterprise/*` |
 | `EKSPodIdentity-AppRole` | `pods.eks.amazonaws.com` (Pod Identity Agent) | S3, DynamoDB, Bedrock, RDS Connect | `aws:SourceAccount`, `aws:SourceArn: arn:aws:eks:*:*:podidentityassociation/*` |
 | `AWSBackup-AirGappedServiceRole` | `backup.amazonaws.com` | Backup cross-account copy, restore | `aws:PrincipalAccount: <BackupVaultAccountID>` |
+| `VPCLattice-GatewayAPIControllerRole` | `pods.eks.amazonaws.com` | VPC Lattice Service & Target Group management | `aws:SourceAccount`, `aws:PrincipalOrgID` |
 
 ---
 
@@ -45,6 +46,7 @@
         "iam:*",
         "organizations:*",
         "route53:*",
+        "route53profiles:*",
         "cloudfront:*",
         "shield:*",
         "wafv2:*",
@@ -75,7 +77,7 @@
       "Condition": {
         "StringNotEquals": {
           "aws:PrincipalAccount": [
-            "111111111111"
+            "${var.network_hub_account_id}"
           ]
         }
       }
@@ -95,8 +97,8 @@
       "Action": "s3:PutObject",
       "Resource": "*",
       "Condition": {
-        "Null": {
-          "s3:x-amz-server-side-encryption": "true"
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
         }
       }
     },
@@ -115,13 +117,36 @@
 }
 ```
 
-### 2.3 RCP: Organization Data Perimeter Boundary (Resource Control Policy)
+### 2.3 SCP 3: Enforce Bedrock Guardrails on Foundation Model Invocations
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "EnforceOrgDataPerimeterOnS3AndKMS",
+      "Sid": "DenyUnguardedBedrockInvocations",
+      "Effect": "Deny",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Null": {
+          "bedrock:GuardrailIdentifier": "true"
+        }
+      }
+    }
+  ]
+}
+```
+
+### 2.4 RCP: Organization Data Perimeter Boundary (Resource Control Policy)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EnforceOrgDataPerimeterWithServiceExceptions",
       "Effect": "Deny",
       "Principal": "*",
       "Action": [
@@ -133,6 +158,9 @@
       "Condition": {
         "StringNotEquals": {
           "aws:PrincipalOrgID": "o-enterpriseorg123"
+        },
+        "BoolIfExists": {
+          "aws:PrincipalIsAWSService": "false"
         }
       }
     }

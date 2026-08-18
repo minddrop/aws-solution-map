@@ -9,11 +9,11 @@ locals {
   account_name = local.account_vars.locals.account_name
   aws_region   = local.region_vars.locals.aws_region
 
-  organization_id = "o-enterpriseorg123"
+  organization_id        = "o-enterpriseorg123"
   terraform_state_bucket = "enterprise-tfstate-${local.account_id}-${local.aws_region}"
 }
 
-# Generate central S3 remote state backend with DynamoDB locking and KMS encryption
+# Generate central S3 remote state backend with DynamoDB locking and KMS CMK encryption
 remote_state {
   backend = "s3"
   generate = {
@@ -26,10 +26,15 @@ remote_state {
     region         = local.aws_region
     encrypt        = true
     dynamodb_table = "enterprise-tf-locks"
+    kms_key_id     = "arn:aws:kms:${local.aws_region}:${local.account_id}:alias/enterprise-tfstate-key"
     s3_bucket_tags = {
-      Owner       = "PlatformEngineering"
-      Environment = "Management"
-      ManagedBy   = "Terragrunt"
+      Owner          = "PlatformEngineering"
+      Environment    = "Management"
+      BusinessUnit   = "CloudOperations"
+      CostCenter     = "CC-1094"
+      ApplicationID  = "EnterprisePlatform"
+      ManagedBy      = "Terragrunt"
+      OrganizationID = local.organization_id
     }
   }
 }
@@ -67,11 +72,13 @@ provider "aws" {
 
   default_tags {
     tags = {
-      ApplicationID   = "EnterprisePlatform"
-      Environment     = "${local.account_name}"
-      Owner           = "PlatformEngineering"
-      ManagedBy       = "Terraform/Terragrunt"
-      OrganizationID  = "${local.organization_id}"
+      ApplicationID  = "EnterprisePlatform"
+      Environment    = "${local.account_name}"
+      Owner          = "PlatformEngineering"
+      BusinessUnit   = "CloudOperations"
+      CostCenter     = "CC-1094"
+      ManagedBy      = "Terraform/Terragrunt"
+      OrganizationID = "${local.organization_id}"
     }
   }
 }

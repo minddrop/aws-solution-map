@@ -7,18 +7,19 @@ The Disaster Recovery & Business Continuity domain guarantees enterprise resilie
 
 The domain boundary encapsulates:
 - **Continuous Block-Level Replication (AWS Elastic Disaster Recovery [DRS])**: Sub-second asynchronous block-level replication of stateful EC2 instances and on-premises physical/virtual machines into a low-cost staging area in the target AWS disaster recovery region.
-- **Cross-Region Cryptographic & Object Replication**: Multi-Region AWS KMS keys paired with Amazon S3 Cross-Region Replication (CRR), S3 Versioning, S3 Same-Region / Cross-Region Object Lock (WORM compliance), and Aurora Global Database replication.
-- **Automated Regional Traffic Failover (Route 53 Application Recovery Controller [ARC])**: Highly available, 5-region quorum routing control cells, readiness checks (validating compute capacity, IAM parity, and service quotas in target region before failover), and automated zonal shift capabilities.
+- **Cross-Region Cryptographic & Object Replication**: Multi-Region AWS KMS keys paired with Amazon S3 Cross-Region Replication (CRR), S3 Versioning, S3 Object Lock (WORM compliance), and Aurora Global Database replication.
+- **Automated Regional Traffic Failover (Route 53 ARC & Zonal Autoshift)**: Highly available, 5-region quorum routing control cells with regional cluster endpoints, readiness checks, and Route 53 ARC Zonal Autoshift for automated evacuation of degraded AZs.
+- **Automated Step Functions Failover Orchestration**: Orchestrates atomic DNS flips, primary DB isolation to prevent split-brain conditions, replication lag verification, secondary Aurora writer promotion, and Karpenter EKS scaling.
 - **Centralized & Air-Gapped Immutable Backups (AWS Backup)**: Organization-wide AWS Backup policies delegating administration to the Backup/DR account, cross-region / cross-account copy into air-gapped Backup Vaults with AWS Backup Vault Lock (Compliance Mode).
-- **Chaos Engineering & Resilience Validation (AWS Fault Injection Service [FIS])**: Automated chaos experiments injecting AZ outages, packet loss, and database failovers to continuously validate resilience posture.
+- **Chaos Engineering & Resilience Validation (AWS Fault Injection Service [FIS])**: Automated chaos experiments injecting AZ outages, packet loss, and database failovers.
 
 ### 1.2 Core AWS Services & Modern Capabilities
-- **AWS Elastic Disaster Recovery (AWS DRS)**: Continuous non-disruptive block-level data replication with point-in-time recovery rollbacks (ransomware protection).
+- **AWS Elastic Disaster Recovery (AWS DRS)**: Continuous non-disruptive block-level data replication with point-in-time recovery rollbacks.
 - **Amazon Route 53 Application Recovery Controller (ARC)**: Multi-region routing controls with 5-region redundant consensus data planes and automated readiness checks.
 - **AWS Route 53 Zonal Shift & Autoshift**: Automated evacuation of impaired Availability Zones without human intervention.
 - **AWS Backup & Backup Vault Lock (Air-Gapped)**: Centrally orchestrated, WORM-locked backup vaults across distinct AWS accounts.
 - **Amazon Aurora Global Database & DynamoDB Global Tables**: Sub-second cross-region storage replication with fast storage-level promotion.
-- **AWS Fault Injection Service (FIS)**: Controlled chaos experiments targeting EKS nodes, RDS failovers, and network disruptions.
+- **AWS Step Functions Automated DR Runbooks**: Atomic execution eliminating human error and split-brain risks.
 
 ---
 
@@ -48,7 +49,13 @@ terraform-aws-disaster-recovery-resilience/
 │   │   ├── control_panel.tf
 │   │   ├── routing_controls.tf
 │   │   ├── readiness_checks.tf
+│   │   ├── zonal_autoshift.tf
 │   │   ├── health_checks.tf
+│   │   └── outputs.tf
+│   ├── step-functions-dr-failover/
+│   │   ├── main.tf
+│   │   ├── failover_state_machine.json
+│   │   ├── iam_roles.tf
 │   │   └── outputs.tf
 │   ├── aws-backup-central-vault/
 │   │   ├── main.tf
@@ -83,6 +90,7 @@ terraform-aws-disaster-recovery-resilience/
 #### SSM Parameter Store Exports:
 | Parameter Path | Type | Consumer / Scope | Purpose |
 | :--- | :--- | :--- | :--- |
+| `/enterprise/dr/arc/cluster-endpoints` | StringList | SRE / Automation Pipelines | 5-region ARC cluster endpoint URIs for failover consensus |
 | `/enterprise/dr/arc/primary-routing-control-arn` | String | Domain 9 (Route 53 Edge) | ARC Routing Control ARN to route traffic to Primary Region |
 | `/enterprise/dr/arc/secondary-routing-control-arn` | String | Domain 9 (Route 53 Edge) | ARC Routing Control ARN to route traffic to DR Region |
 | `/enterprise/dr/backup/central-vault-arn` | String | All Workload Accounts | Air-gapped AWS Backup Central Vault ARN |
@@ -92,10 +100,6 @@ terraform-aws-disaster-recovery-resilience/
 - **Upstream Dependencies**: Domain 1 (`terraform-aws-landing-zone-network-fabric` for DR VPCs), Domain 3 (`terraform-aws-central-identity-kms-security` for Multi-Region KMS Keys), Domain 6 (Aurora Global DB / DynamoDB Global Tables).
 - **Downstream Consumers**: Domain 9 (Edge DNS failover policies), Domain 7 (Standby Compute Runtimes).
 
-#### IAM Baseline Assumptions:
-- AWS Backup IAM service role configured with cross-account backup copy permissions to the dedicated Air-Gapped Backup Vault account.
-- Vault Lock policy in Compliance Mode explicitly configured with minimum retention period and un-deletable lock state.
-
 ---
 
 ## 3. Architecture Topology Diagram
@@ -104,17 +108,22 @@ terraform-aws-disaster-recovery-resilience/
 flowchart TB
     subgraph Global_Traffic_Control["Global Traffic & Recovery Orchestration Layer"]
         subgraph Route53_ARC_Core["Route 53 Application Recovery Controller (ARC)"]
-            ARC_Quorum["5-Region Quorum Control Plane"]
+            ARC_Quorum["5-Region Quorum Control Plane (5 Cluster Endpoints)"]
             RC_Primary["Routing Control: Region US-East-1 (Active = 1)"]
             RC_Secondary["Routing Control: Region US-West-2 (Standby = 0)"]
             Readiness_Check["Readiness Checks (Validates DB/Compute/Quotas)"]
+            Zonal_Autoshift["Route 53 ARC Zonal Autoshift"]
         end
         Route53_Edge_DNS["Route 53 Edge DNS (DNS Failover Routing)"]
     end
 
+    subgraph DR_Failover_Orchestrator["Automated Step Functions Failover Engine"]
+        SFN_Failover["Atomic DR Failover State Machine"]
+    end
+
     subgraph AWS_Region_Primary["Primary AWS Region: us-east-1"]
         subgraph Primary_Compute_Tier["Primary Active Compute"]
-            ALB_Primary["Primary Ingress ALB"]
+            ALB_Primary["Primary Ingress ALB (Zonal Autoshift Enabled)"]
             EKS_Primary["Active EKS Production Cluster"]
             EC2_Stateful["Stateful App EC2 Instances"]
         end
@@ -155,6 +164,12 @@ flowchart TB
     Route53_ARC_Core -.->|Automated Failover| ALB_Secondary
     Readiness_Check -.->|Continuous Health & Capacity Audit| Secondary_Compute_Tier & Secondary_Data_Tier
 
+    %% Automated Step Functions Orchestration
+    SFN_Failover -->|1. Flip Routing Controls| Route53_ARC_Core
+    SFN_Failover -->|2. Revoke Primary DB SG (Prevent Split-Brain)| Aurora_Primary
+    SFN_Failover -->|3. Verify Lag < 1s & Promote Writer| Aurora_Secondary
+    SFN_Failover -->|4. Trigger Karpenter Scaling| EKS_Secondary
+
     %% Data Replication Flows (Continuous)
     Aurora_Primary -->|Storage-level Dedicated Net Replication (<1s)| Aurora_Secondary
     DDB_Primary <-->|Active-Active Replication| DDB_Secondary
@@ -172,28 +187,27 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Air-Gapped Ransomware Vault*: AWS Backup Vault Lock in Compliance Mode enforces WORM retention in a physically separate AWS account; even a fully compromised root admin in the primary account cannot delete or truncate backups.
-  - *Multi-Region KMS Parity*: Replicated data is re-encrypted with secondary region KMS CMKs during transit, preserving least-privilege key isolation across geographical borders.
+  - *Air-Gapped Ransomware Vault*: AWS Backup Vault Lock in Compliance Mode enforces WORM retention in a physically separate AWS account.
+  - *Multi-Region KMS Parity*: Replicated data is re-encrypted with secondary region KMS CMKs during transit.
 - **Reliability**:
-  - *ARC 5-Region Redundant Control Plane*: Route 53 ARC routing controls rely on a 5-region consensus cluster, guaranteeing failover execution capability even when the primary AWS region suffers total control plane outage.
-  - *Readiness Checks Prevent Bad Failovers*: Continuous audit of target region capacity prevents routing traffic to an under-provisioned DR region that would instantly collapse under full production load.
+  - *ARC 5-Region Cluster Endpoints*: Failover scripts try all 5 regional cluster endpoints to guarantee execution during catastrophic multi-region events.
+  - *Split-Brain Prevention*: Step Functions atomically isolates primary database security groups before promoting the secondary Aurora cluster.
+  - *ARC Zonal Autoshift*: Automatically shifts traffic away from impaired Availability Zones without human delay.
 - **Operational Excellence**:
-  - *Non-Disruptive DR Drills with DRS*: AWS DRS allows instant spinning up of test recovery instances in an isolated VPC subnet for compliance drills without stopping continuous live data replication.
-  - *Chaos Engineering (AWS FIS)*: Scheduled FIS experiments inject artificial AZ disruptions to continuously validate MTTR and alerting runbooks.
+  - *Non-Disruptive DR Drills with DRS*: AWS DRS allows instant testing in isolated VPC subnets without halting replication.
 - **Cost Optimization**:
-  - *Pilot Light with DRS & Aurora Global*: Rather than running expensive full-capacity compute in the DR region (hot standby), DRS utilizes micro-sized staging instances and EBS storage, cutting standby compute costs by over 80% while preserving a sub-15 minute RTO.
-  - *S3 Lifecycle Tiering on DR Buckets*: S3 replication destination buckets transition aged objects directly to Glacier Flexible / Deep Archive.
+  - *Pilot Light with DRS & Aurora Global*: Micro-sized staging instances and EBS storage cut standby compute costs by over 80% while preserving sub-15 min RTO.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
 #### Risk 1: Split-Brain Catastrophe During Aurora Global Database Promotion
-- **Failure Mechanism**: Network partition occurs between primary and secondary regions. Operations team triggers an uncoordinated failover on Aurora Global Database in the secondary region while the primary database is still accepting client writes, creating irreconcilable transactional divergence and corrupted financial ledgers.
+- **Failure Mechanism**: Secondary Aurora cluster is promoted while primary database is still reachable and accepting writes, corrupting database ledgers.
 - **Mitigation Strategy**:
-  1. Mandate the use of Route 53 ARC routing controls as the single source of truth for failover state.
-  2. Implement an automated AWS Step Functions orchestration runbook: ARC atomically flips DNS -> Revokes primary region DB write security group -> Waits 30 seconds for replication lag drain -> Promotes secondary Aurora cluster to standalone writer.
+  1. Mandate the use of Route 53 ARC and Step Functions as the single source of truth for failover.
+  2. Implement automated state machine steps: Flip ARC Routing Controls $\rightarrow$ Revoke primary DB ingress SG $\rightarrow$ Wait for replication lag drain ($< 1\text{ s}$) $\rightarrow$ Promote secondary cluster.
 
-#### Risk 2: Target Region AWS Service Quota Failure During Emergency Spin-Up
-- **Failure Mechanism**: The primary region fails, and Karpenter / DRS attempts to launch 500 Graviton EC2 instances in the DR region, but fails immediately due to an unadjusted regional vCPU service quota (`Running On-Demand Standard instances`), halting recovery.
+#### Risk 2: Secondary Region Service Quota Starvation
+- **Failure Mechanism**: Primary region fails, and Karpenter / DRS fails to launch EC2 instances in the DR region due to unadjusted vCPU quotas.
 - **Mitigation Strategy**:
-  1. Implement Route 53 ARC Readiness Checks configured to track target region service quotas vs primary region consumption.
-  2. Deploy automated Terraform pipeline syncs that programmatically request and match AWS Service Quotas in all secondary regions whenever primary capacity is increased.
+  1. Implement Route 53 ARC Readiness Checks tracking target region service quotas.
+  2. Deploy automated Terraform pipeline syncs requesting matching AWS Service Quotas in all secondary regions.

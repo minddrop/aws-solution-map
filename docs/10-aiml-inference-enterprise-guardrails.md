@@ -6,19 +6,20 @@
 The AI/ML Inference & Enterprise Guardrails domain establishes a secure, enterprise-grade foundation for Generative AI, Large Language Model (LLM) orchestration, fine-tuning, retrieval-augmented generation (RAG), and traditional machine learning inference. It enforces strict data privacy, prompt injection defenses, automated PII redaction, content filtering, and zero data leakage over public networks.
 
 The domain boundary encapsulates:
-- **Foundation Model Orchestration & Guardrails (Amazon Bedrock)**: Serverless access to state-of-the-art foundation models (Claude 3.5 Sonnet/Haiku, Titan, Llama 3) via Amazon Bedrock, protected by Amazon Bedrock Guardrails (toxic content filtering, topic blocking, contextual grounding, PII anonymization, and prompt injection defense).
-- **Retrieval-Augmented Generation (Bedrock Knowledge Bases)**: Managed vector ingestion, chunking, and embedding pipelines connecting to Amazon OpenSearch Serverless (vector engine), Amazon Aurora pgvector, or Pinecone, with granular S3 data source synchronization.
-- **Enterprise ML Training & Inference (Amazon SageMaker)**: SageMaker Studio, distributed multi-GPU training clusters (EC2 P5/G5 instances), and SageMaker Real-Time / Asynchronous Inference Endpoints with automated scaling policies.
-- **Zero-Public Ingress/Egress AI Networking (AWS PrivateLink)**: Dedicated Interface VPC Endpoints for Bedrock Runtime, SageMaker API, and Model Registry, ensuring all prompts, embeddings, and inference payloads traverse exclusively within private VPC endpoints and customer KMS encryption boundaries.
-- **GenAI Auditability & Model Evaluation**: Bedrock Model Invocation Logging to central S3 buckets and CloudWatch Log Groups, paired with automated model evaluation benchmarks.
+- **Foundation Model Orchestration & Cross-Region Routing (Amazon Bedrock)**: Serverless access to state-of-the-art foundation models (Claude 3.5 Sonnet/Haiku, Titan, Llama 3) via Amazon Bedrock, dynamically load-balanced across regions using Cross-Region Inference Profiles (`us.anthropic.claude-3-5-sonnet-20241022-v2:0`) to eliminate regional token throttling.
+- **Enterprise Guardrails & Anti-Jailbreak (Bedrock Guardrails)**: Deterministic and ML safety filters enforcing topic denial, PII anonymization, prompt injection defense, and contextual grounding (anti-hallucination) with mandatory IAM policy enforcement (`bedrock:GuardrailIdentifier`).
+- **Retrieval-Augmented Generation (Bedrock Knowledge Bases)**: Managed vector ingestion connecting to Amazon OpenSearch Serverless (vector engine) with granular tenant metadata filtering and S3 data synchronization.
+- **Enterprise ML Training & Inference (Amazon SageMaker)**: SageMaker Studio, distributed multi-GPU training clusters, and Real-Time / Asynchronous Endpoints.
+- **Zero-Public Ingress/Egress AI Networking (AWS PrivateLink)**: Dedicated Interface VPC Endpoints for Bedrock Runtime, SageMaker API, and Model Registry.
+- **GenAI Auditability & Invocation Logging**: 100% prompt, completion, and guardrail evaluation logging to central S3 audit buckets in the Log Archive account.
 
 ### 1.2 Core AWS Services & Modern Capabilities
-- **Amazon Bedrock & Bedrock Agents**: Serverless multi-model APIs, multi-step agentic workflows with OpenAPI action group integrations.
-- **Amazon Bedrock Guardrails**: Deterministic and ML-based safety filters, PII masking/redaction, and contextual grounding checks (detecting hallucinations and irrelevance).
-- **Amazon OpenSearch Serverless (Vector Engine)**: Billion-scale vector embeddings storage with cosine and euclidean similarity search.
-- **Amazon SageMaker JumpStart & Endpoints**: Dedicated deployment of open-source and proprietary models with custom inference containers (Triton / vLLM).
-- **AWS PrivateLink for Bedrock**: Strict private network path for GenAI inference with zero public internet routing.
-- **KMS Customer Managed Keys for GenAI**: Enforced customer key encryption for Bedrock custom models, knowledge base vector indexes, and invocation logs.
+- **Amazon Bedrock & Cross-Region Inference Profiles**: High-throughput foundation model invocation dynamically balanced across US/EU regions.
+- **Amazon Bedrock Guardrails**: PII masking/redaction, anti-jailbreak, and contextual grounding scoring against source RAG documents.
+- **Amazon OpenSearch Serverless (Vector Engine)**: Billion-scale vector embeddings storage with cosine similarity search.
+- **Amazon SageMaker Endpoints**: Dedicated GPU inference with custom Triton/vLLM containers.
+- **AWS PrivateLink for Bedrock**: Strict private network path with zero public internet routing.
+- **KMS CMKs for GenAI**: Enforced customer key encryption for custom models, vector indexes, and invocation logs.
 
 ---
 
@@ -36,6 +37,7 @@ terraform-aws-aiml-inference-guardrails/
 │       └── guardrail-eval-test.yml
 ├── config/
 │   ├── bedrock-guardrails-prod.tfvars
+│   ├── cross-region-inference.tfvars
 │   ├── knowledge-base-rag.tfvars
 │   └── sagemaker-endpoints.tfvars
 ├── modules/
@@ -45,12 +47,17 @@ terraform-aws-aiml-inference-guardrails/
 │   │   ├── pii_entities.tf
 │   │   ├── topic_denials.tf
 │   │   ├── contextual_grounding.tf
+│   │   ├── invocation_iam_policy.tf
+│   │   └── outputs.tf
+│   ├── bedrock-cross-region-profiles/
+│   │   ├── main.tf
+│   │   ├── routing_profiles.tf
 │   │   └── outputs.tf
 │   ├── bedrock-knowledge-bases/
 │   │   ├── main.tf
 │   │   ├── opensearch_serverless_vector.tf
 │   │   ├── s3_data_source.tf
-│   │   ├── chunking_strategy.tf
+│   │   ├── tenant_filtering.tf
 │   │   └── outputs.tf
 │   ├── sagemaker-inference-endpoint/
 │   │   ├── main.tf
@@ -85,7 +92,8 @@ terraform-aws-aiml-inference-guardrails/
 | Parameter Path | Type | Consumer / Scope | Purpose |
 | :--- | :--- | :--- | :--- |
 | `/enterprise/ai/bedrock/guardrail-id` | String | Application Services / Agents | Bedrock Guardrail ID enforcing enterprise safety policies |
-| `/enterprise/ai/bedrock/guardrail-version` | String | Application Services | Production version of the Bedrock Guardrail (`DRAFT` vs `1`) |
+| `/enterprise/ai/bedrock/guardrail-version` | String | Application Services | Production version of the Bedrock Guardrail (`1` vs `DRAFT`) |
+| `/enterprise/ai/bedrock/inference-profile-sonnet-arn` | String | Application Services | Cross-Region Inference Profile ARN for Claude 3.5 Sonnet |
 | `/enterprise/ai/rag/knowledge-base-id` | String | GenAI Chatbot Services | Central Knowledge Base ID for enterprise document RAG |
 | `/enterprise/ai/sagemaker/fraud-endpoint-name` | String | Domain 8 (Fraud Detection Workflows) | Real-time SageMaker fraud inference endpoint name |
 | `/enterprise/ai/privatelink/bedrock-vpce-id` | String | Compute Workload VPCs | PrivateLink VPC Endpoint ID for Bedrock runtime |
@@ -124,15 +132,20 @@ flowchart TB
             Guardrail_Grounding["Contextual Grounding (Anti-Hallucination)"]
         end
 
-        subgraph Bedrock_Foundation_Models["Managed Foundation Models"]
-            Claude_Model["Anthropic Claude 3.5 Sonnet / Haiku"]
-            Titan_Model["Amazon Titan Embeddings V2"]
-            Llama_Model["Meta Llama 3 70B"]
+        subgraph Bedrock_Cross_Region_Router["Cross-Region Inference Profile Router"]
+            CR_Profile_Sonnet["Profile: us.anthropic.claude-3-5-sonnet-20241022-v2:0"]
+            CR_Profile_Haiku["Profile: us.anthropic.claude-3-5-haiku-20241022-v1:0"]
+        end
+
+        subgraph Bedrock_Foundation_Models["Managed Foundation Models (Multi-Region Quorum)"]
+            Claude_East["Claude 3.5 Sonnet (us-east-1)"]
+            Claude_West["Claude 3.5 Sonnet (us-west-2)"]
+            Claude_Central["Claude 3.5 Sonnet (us-east-2)"]
         end
 
         subgraph Bedrock_RAG_Platform["Managed Knowledge Bases (RAG Engine)"]
             KB_Ingestion["Knowledge Base Ingestion & Chunking"]
-            AOSS_Vector_DB["OpenSearch Serverless Vector Index (KMS Encrypted)"]
+            AOSS_Vector_DB["OpenSearch Serverless Vector Index (Tenant Filtered)"]
             S3_RAG_Docs["S3 Document Vault (KMS Encrypted)"]
         end
 
@@ -153,12 +166,13 @@ flowchart TB
     Async_Batch_Worker -->|Private Features| VPCE_SageMaker
 
     VPCE_Bedrock --> Guardrail_Defense_Layer
-    Guardrail_Defense_Layer -->|Sanitized Prompt| Claude_Model & Llama_Model
+    Guardrail_Defense_Layer -->|Sanitized Prompt| Bedrock_Cross_Region_Router
+    CR_Profile_Sonnet --> Claude_East & Claude_West & Claude_Central
 
     %% RAG Retrieval Flow
-    GenAI_Microservice -->|Vector Query| VPCE_AOSS
+    GenAI_Microservice -->|Vector Query with Tenant Filter| VPCE_AOSS
     VPCE_AOSS --> AOSS_Vector_DB
-    KB_Ingestion --> Titan_Model --> AOSS_Vector_DB
+    KB_Ingestion --> AOSS_Vector_DB
     S3_RAG_Docs --> KB_Ingestion
 
     %% Dedicated SageMaker Flow
@@ -177,27 +191,26 @@ flowchart TB
 ### 4.1 Well-Architected Assessment
 - **Security**:
   - *Comprehensive Data Privacy*: Bedrock guarantees zero customer prompt/completion data is used to train base models. Customer data is encrypted in transit (TLS 1.3) and at rest with Customer Managed KMS Keys.
-  - *Automated Prompt Injection & PII Scrubbing*: Bedrock Guardrails intercepts malicious adversarial prompts (jailbreaks) and automatically masks sensitive PII before text is processed by foundation models.
+  - *Automated Prompt Injection & PII Scrubbing*: Bedrock Guardrails intercepts malicious prompts and masks PII before LLM processing.
+  - *IAM Condition Key Enforcement*: Mandates `bedrock:GuardrailIdentifier` in all IAM policies.
 - **Reliability**:
-  - *Multi-Model Fallback Pattern*: Application clients configure automated circuit breakers; if primary LLM (Claude 3.5 Sonnet) experiences latency or service quota limits, traffic falls back transparently to secondary models (Llama 3 / Claude Haiku).
-  - *Cross-Region Bedrock Inference Profiles*: Routes requests across multiple AWS regions dynamically to balance capacity and mitigate regional quota exhaustion.
+  - *Cross-Region Inference Profiles*: Dynamically balances token loads across `us-east-1`, `us-west-2`, and `us-east-2`, mitigating regional quota exhaustion (HTTP 429).
 - **Operational Excellence**:
-  - *Centralized Invocation Audit Logging*: Logs 100% of prompts, model responses, and guardrail evaluation metadata to the dedicated Log Archive S3 bucket for compliance auditing (EU AI Act, HIPAA).
-  - *Contextual Grounding Evaluation*: Scores model outputs against source retrieved RAG documents, automatically dropping hallucinated responses before they reach end users.
+  - *Centralized Invocation Audit Logging*: Logs 100% of prompts, model responses, and guardrail evaluations to Log Archive S3 buckets.
+  - *Contextual Grounding Evaluation*: Evaluates model outputs against retrieved RAG chunks, dropping hallucinated responses.
 - **Cost Optimization**:
-  - *Intelligent Model Routing*: Routes simple classification and summarization tasks to low-cost models (Claude Haiku / Titan) and complex reasoning tasks to Claude Sonnet, reducing inference token spend by over 70%.
-  - *Provisioned Throughput vs On-Demand*: On-Demand pricing for variable development workloads; Provisioned Throughput (Commitment Model Units) for sustained production traffic.
+  - *Intelligent Model Routing*: Routes simple tasks to Claude Haiku / Titan and complex reasoning to Claude Sonnet.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
-#### Risk 1: Knowledge Base Vector Index Poisoning & Unauthorized Cross-Tenant RAG Retrieval
-- **Failure Mechanism**: Documents belonging to Tenant A are indexed into the shared OpenSearch Serverless vector store without tenant isolation metadata. Tenant B performs a search query and the RAG pipeline injects Tenant A's private financial data into Tenant B's LLM context window.
+#### Risk 1: Knowledge Base Cross-Tenant Data Leakage
+- **Failure Mechanism**: Shared vector embeddings return documents across tenant boundaries.
 - **Mitigation Strategy**:
-  1. Enforce strict document metadata tagging (`tenant_id`, `department_id`) at S3 ingestion time.
-  2. Implement OpenSearch Serverless vector search pre-filtering: Bedrock Knowledge Base queries must include explicit metadata filters (`tenant_id == current_session_tenant_id`).
+  1. Enforce strict document metadata tagging (`tenant_id`) at S3 ingestion time.
+  2. Implement OpenSearch Serverless vector search pre-filtering requiring `tenant_id == current_session_tenant_id`.
 
-#### Risk 2: Bedrock Account-Level Token Quota Exhaustion Causing Global Application Outages
-- **Failure Mechanism**: An asynchronous document processing batch job consumes the entire account-level Tokens Per Minute (TPM) quota on Claude 3.5 Sonnet, starving customer-facing live chatbots and returning HTTP 429 Too Many Requests.
+#### Risk 2: Bedrock Single-Region Token Quota Exhaustion
+- **Failure Mechanism**: Batch document processing exhausts account-level TPM quotas in `us-east-1`, starving live chatbots.
 - **Mitigation Strategy**:
-  1. Utilize Amazon Bedrock Cross-Region Inference Profiles to automatically distribute token loads across `us-east-1`, `us-west-2`, and `eu-west-1`.
-  2. Implement rate limiting and token bucket buffering in upstream SQS / EventBridge queues for asynchronous batch jobs.
+  1. Utilize Amazon Bedrock Cross-Region Inference Profiles (`us.anthropic.claude-3-5-sonnet-20241022-v2:0`).
+  2. Implement rate-limiting token bucket queues in SQS for asynchronous batch tasks.

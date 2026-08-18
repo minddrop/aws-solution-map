@@ -6,19 +6,19 @@
 The Central Observability, Telemetry & Compliance domain provides unified, organization-wide visibility across logs, metrics, distributed traces, and audit events. It enforces immutable compliance retention, near-real-time streaming analytics, and automated alerting pipelines for Site Reliability Engineering (SRE) and Security Operations Center (SOC) teams.
 
 The domain boundary encapsulates:
-- **Audit & Forensic Logging**: AWS CloudTrail Organization Trail with multi-region delivery, immutable S3 Object Lock in Log Archive account, CloudTrail Lake event data stores, and AWS Config Organization Aggregators.
-- **Cross-Account Telemetry Aggregation**: Amazon CloudWatch Cross-Account Observability (sink account configuration in Log/Monitoring account), enabling unified search, dashboarding, and composite alarms across hundreds of member accounts without data replication overhead.
-- **Central Log Streaming & Search Fabric**: Amazon Kinesis Data Firehose pipelines ingesting VPC Flow Logs, Route 53 Resolver query logs, WAF access logs, and container logs into Amazon OpenSearch Service (or Datadog / Splunk HTTP Event Collector).
+- **Audit & Forensic Logging**: AWS CloudTrail Organization Trail with multi-region delivery, immutable S3 Object Lock in Log Archive account, CloudTrail Lake event data stores (365-day operational SQL), and AWS Config Organization Aggregators.
+- **Cross-Account Telemetry Aggregation**: Amazon CloudWatch Cross-Account Observability (sink account configuration in Log/Monitoring account via OAM), enabling unified search, dashboarding, and composite alarms across member accounts without data duplication overhead.
+- **Central Log Streaming & Search Fabric**: Amazon Kinesis Data Firehose pipelines ingesting VPC Flow Logs, Route 53 Resolver query logs, WAF access logs, and container logs into Amazon OpenSearch Service Multi-AZ with Standby.
 - **Distributed Tracing & APM**: AWS X-Ray and OpenTelemetry (ADOT - AWS Distro for OpenTelemetry) instrumentation for containerized and serverless workloads, forwarding traces to centralized X-Ray trace stores.
 - **Compliance & Configuration Drift Auditing**: AWS Config rules (conformance packs for CIS Benchmark, SOC 2, HIPAA) with automated remediation triggers.
 
 ### 1.2 Core AWS Services & Modern Capabilities
-- **AWS CloudTrail Lake**: SQL-queryable audit log store across all accounts with fine-grained retention and multi-region data capture.
-- **CloudWatch Cross-Account Observability**: CloudWatch Logs, Metrics, and X-Ray traces queried centrally in a designated Monitoring account via CloudWatch Observability Access Manager (OAM).
-- **Amazon OpenSearch Service & OpenSearch Serverless**: Scalable vector and text log indexing with UltraWarm and Cold storage tiering for petabyte-scale search.
-- **AWS Distro for OpenTelemetry (ADOT)**: Standardized CNCF OpenTelemetry collectors deployed as EKS DaemonSets and ECS Sidecars for uniform trace/metric collection.
-- **AWS Config Organization Aggregator & Conformance Packs**: Continuous configuration tracking, compliance scoring, and drift detection.
-- **S3 Object Lock (Compliance Mode)**: WORM (Write Once, Read Many) storage enforcing legal hold and non-erasable audit logs for 7+ years.
+- **AWS CloudTrail Lake**: SQL-queryable audit log store across all accounts with 365-day retention for sub-minute forensic investigations.
+- **CloudWatch Cross-Account Observability (OAM)**: Query metrics, logs, and traces centrally without cross-account log duplication charges.
+- **Amazon OpenSearch Service (Multi-AZ with Standby)**: Zero-downtime cluster topology with UltraWarm and Cold storage tiering.
+- **AWS Distro for OpenTelemetry (ADOT)**: Standardized CNCF OpenTelemetry collectors with client-side buffer persistence.
+- **AWS Config Organization Aggregator & Conformance Packs**: Continuous configuration tracking and drift detection.
+- **S3 Object Lock (Compliance Mode)**: WORM (Write Once, Read Many) storage enforcing non-erasable audit logs transitioning to Glacier Deep Archive for 7+ years.
 
 ---
 
@@ -52,6 +52,7 @@ terraform-aws-central-observability-compliance/
 │   ├── opensearch-log-analytics/
 │   │   ├── main.tf
 │   │   ├── vpc_endpoints.tf
+│   │   ├── standby_cluster.tf
 │   │   ├── index_state_management.tf
 │   │   ├── dashboards.tf
 │   │   └── outputs.tf
@@ -64,9 +65,9 @@ terraform-aws-central-observability-compliance/
 │   │   ├── conformance_packs.tf
 │   │   └── remediation_rules.tf
 │   └── adot-collector-baseline/
-│       ├── collectors_config.yaml
-│       ├── iam_roles.tf
-│       └── outputs.tf
+│   │   ├── collectors_config.yaml
+│   │   ├── iam_roles.tf
+│   │   └── outputs.tf
 ├── live/
 │   ├── log-archive-account/
 │   │   ├── terragrunt.hcl
@@ -97,10 +98,6 @@ terraform-aws-central-observability-compliance/
 #### Remote State & Inter-Module Dependencies:
 - **Upstream Dependencies**: Domain 1 (`terraform-aws-landing-zone-network-fabric` for Log Archive & Shared Services VPCs), Domain 3 (`terraform-aws-central-identity-kms-security` for KMS CMKs).
 - **Downstream Consumers**: Domain 7 (Compute/EKS container logging), Domain 8 (EventBridge audit tracing), Domain 9 (WAF/CloudFront access logs), Domain 10 (Bedrock model invocation logs).
-
-#### IAM Baseline Assumptions:
-- CloudWatch Logs Cross-Account Subscription filters permitted to assume `arn:aws:iam::<LogArchiveAccount>:role/CWLogsCentralFirehoseRole`.
-- S3 Bucket Policy in Log Archive strictly enforces `s3:PutObject` with KMS encryption and denies `s3:DeleteObject` or `s3:PutBucketPolicy` (governed by S3 Object Lock Compliance Mode).
 
 ---
 
@@ -133,7 +130,7 @@ flowchart TB
         
         subgraph Log_Analytics_Platform["Log Analytics & Search Engine"]
             Kinesis_Firehose["Amazon Kinesis Data Firehose (Batch/Compress)"]
-            OpenSearch_Cluster["Amazon OpenSearch Service (VPC Managed)"]
+            OpenSearch_Cluster["OpenSearch Multi-AZ with Standby (3 AZs)"]
             OpenSearch_Dashboards["OpenSearch Dashboards / SIEM"]
         end
 
@@ -143,7 +140,7 @@ flowchart TB
     end
 
     subgraph Log_Archive_Compliance_Account["Log Archive Account (Strict Compliance WORM)"]
-        CloudTrail_Lake["AWS CloudTrail Lake (Org Event Data Store)"]
+        CloudTrail_Lake["AWS CloudTrail Lake (365-Day SQL Store)"]
         
         subgraph S3_Compliance_Vault["Immutable S3 Data Vault (Object Lock Compliance Mode)"]
             S3_CloudTrail_Logs["CloudTrail Org Trail (Global Multi-Region)"]
@@ -159,7 +156,7 @@ flowchart TB
     Workload_Accounts -.->|Audit Data Events| CloudTrail_Lake
     Workload_Accounts -.->|Direct Flow Log Export| S3_VPC_Flow_Logs
     CW_Logs_Local -->|Subscription Filter| Kinesis_Firehose
-    S3_Compliance_Vault -->|Lifecycle Policy (180 Days)| S3_Archival_Glacier
+    S3_Compliance_Vault -->|Lifecycle Policy (90 Days)| S3_Archival_Glacier
 ```
 
 ---
@@ -168,28 +165,28 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Immutability & Forensic Integrity*: CloudTrail logs and audit trails are delivered directly to the dedicated Log Archive account with S3 Object Lock in Compliance Mode (cannot be overwritten or deleted even by the root AWS account).
+  - *Immutability & Forensic Integrity*: CloudTrail logs and audit trails are delivered directly to the Log Archive account with S3 Object Lock in Compliance Mode.
   - *Data Encryption*: Dedicated KMS CMK with cross-account grants encrypts all CloudTrail, Firehose, and OpenSearch stores.
 - **Reliability**:
-  - *Resilient Query Architecture*: CloudWatch Cross-Account Observability (OAM) decouples telemetry queries from streaming ingestion pipelines; if streaming infrastructure undergoes maintenance, SREs still maintain full real-time metric/log visibility via the AWS native plane.
-  - *OpenSearch Multi-AZ with Standby*: OpenSearch domain configured with 3 Master nodes and 3 Data nodes across 3 AZs with automated index state management (ISM).
+  - *OpenSearch Multi-AZ with Standby*: Guarantees 99.99% availability with automated node failover and zero-downtime maintenance.
+  - *Decoupled Telemetry Queries*: CloudWatch OAM provides continuous SRE visibility even during data streaming maintenance windows.
 - **Operational Excellence**:
-  - *CloudTrail Lake SQL Analytics*: Eliminates Athena ETL pipeline setup for ad-hoc SOC queries; provides sub-minute SQL queries across years of enterprise CloudTrail event history.
-  - *Composite Alarms*: Aggregates infrastructure and application metrics to prevent alarm fatigue (e.g., alert fires only if CPU > 85% AND HTTP 5xx Error Rate > 2% simultaneously).
+  - *CloudTrail Lake Operational SQL*: Sub-minute SQL queries across organization event data stores without manual Athena ETL configuration.
+  - *Composite Alarms*: Aggregates infrastructure and application metrics to prevent alarm fatigue.
 - **Cost Optimization**:
-  - *CloudWatch Cross-Account OAM vs Log Copying*: OAM queries data in-place without duplicating log storage across accounts, saving tens of thousands of dollars monthly in cross-account data transfer and redundant ingestion fees.
-  - *OpenSearch UltraWarm & Cold Storage*: Moves aged indices (> 7 days) to UltraWarm (backed by S3) and > 30 days to Cold storage, slashing OpenSearch compute/EBS storage costs by over 70%.
+  - *Lifecycle Tiering Synchronization*: CloudTrail Lake handles immediate 365-day operational queries, while S3 archives transition to Glacier Deep Archive after 90 days, cutting long-term storage costs by 95%.
+  - *OpenSearch UltraWarm & Cold Storage*: Moves aged indices (> 7 days) to UltraWarm and > 30 days to Cold storage.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
 #### Risk 1: CloudWatch Logs Ingestion Throttling & Silent Data Loss
-- **Failure Mechanism**: A sudden traffic spike or runaway debug logging event triggers severe rate-limiting on CloudWatch Logs ingestion APIs (`PutLogEvents` throttled at the account/region level), leading to buffer overflows and lost application telemetry in FluentBit / ADOT collectors.
+- **Failure Mechanism**: A sudden traffic surge triggers rate-limiting on CloudWatch Logs ingestion APIs (`PutLogEvents`), causing telemetry drops.
 - **Mitigation Strategy**:
-  1. Implement Kinesis Data Firehose with client-side buffer persistence (e.g., FluentBit disk buffering with `storage.type filesystem`).
-  2. Configure CloudWatch Logs dynamic retention and rate-limit alarms (`IncomingBytesExceeded`), with backpressure handling in the ADOT collector.
+  1. Implement Kinesis Data Firehose with client-side buffer persistence in FluentBit (`storage.type filesystem`).
+  2. Configure rate-limit alarms (`IncomingBytesExceeded`) and backpressure handling in ADOT collectors.
 
-#### Risk 2: OpenSearch Cluster Storage Exhaustion and Index Locking (Read-Only Lock)
-- **Failure Mechanism**: Rapid surge in uncompressed VPC flow or application logs exceeds 85% of OpenSearch EBS disk capacity. OpenSearch automatically flips the cluster into `read_only_allow_delete` mode, dropping incoming Firehose log streams and halting SOC visibility.
+#### Risk 2: OpenSearch Cluster Storage Exhaustion and Read-Only Lock
+- **Failure Mechanism**: Rapid surge in VPC flow or application logs exceeds 85% of OpenSearch capacity, triggering `read_only_allow_delete` mode.
 - **Mitigation Strategy**:
-  1. Implement OpenSearch Index State Management (ISM) policies that rollover indices by size (e.g., 50GB per primary shard) and migrate to UltraWarm when disk reaches 70%.
-  2. Configure Kinesis Firehose S3 backup delivery stream: If OpenSearch indexing fails or throttles, Firehose automatically diverts failed payloads to an S3 error recovery bucket for replay.
+  1. Implement OpenSearch Index State Management (ISM) policies that rollover indices by size (50GB per primary shard) and migrate to UltraWarm at 70% capacity.
+  2. Configure Kinesis Firehose S3 backup delivery stream for automated replay of dropped payloads.

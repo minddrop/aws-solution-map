@@ -22,15 +22,35 @@
           "items": { "type": "string", "format": "ipv4" },
           "description": "IP addresses for Route 53 Inbound Resolver endpoints"
         },
+        "/enterprise/network/dns/outbound-endpoint-id": {
+          "type": "string",
+          "description": "Route 53 Outbound Endpoint ID for conditional forwarding",
+          "pattern": "^rslvr-out-[a-f0-9]+$"
+        },
+        "/enterprise/network/dns/r53-profile-arn": {
+          "type": "string",
+          "description": "Route 53 Profile ARN aggregating PHZs and DNS Firewall rules across the Organization",
+          "pattern": "^arn:aws:route53profiles:[a-z0-9-]+:[0-9]{12}:profile/rp-[a-f0-9]+$"
+        },
         "/enterprise/network/ipam/workload-prod-pool-id": {
           "type": "string",
           "description": "IPAM Pool ID for Production Workload VPC allocations"
+        },
+        "/enterprise/network/ipam/workload-nonprod-pool-id": {
+          "type": "string",
+          "description": "IPAM Pool ID for Non-Prod Spoke CIDR provisioning"
+        },
+        "/enterprise/security/rcp/enforced-org-id": {
+          "type": "string",
+          "description": "Organization ID enforced in Resource Control Policies",
+          "pattern": "^o-[a-z0-9]{10,32}$"
         }
       },
       "required": [
         "/enterprise/network/tgw/id",
         "/enterprise/network/tgw/spoke-rt-id",
         "/enterprise/network/dns/inbound-resolver-ips",
+        "/enterprise/network/dns/r53-profile-arn",
         "/enterprise/network/ipam/workload-prod-pool-id"
       ]
     },
@@ -48,6 +68,20 @@
         "/enterprise/hybrid/bgp/asn-aws": {
           "type": "string",
           "description": "AWS BGP Autonomous System Number"
+        },
+        "/enterprise/hybrid/bgp/asn-onprem-primary": {
+          "type": "string",
+          "description": "On-Premises Primary Data Center ASN"
+        },
+        "/enterprise/hybrid/vpn/accelerated-endpoint-ips": {
+          "type": "array",
+          "items": { "type": "string", "format": "ipv4" },
+          "description": "Public Anycast IPs for Accelerated Site-to-Site VPN"
+        },
+        "/enterprise/hybrid/bgp/allowed-prefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CIDR blocks advertised across DXGW to on-premises"
         }
       },
       "required": [
@@ -65,16 +99,29 @@
         },
         "/enterprise/security/kms/cross-region-dr-key-arn": {
           "type": "string",
-          "description": "Multi-region KMS CMK ARN for secondary region replication"
+          "description": "Primary multi-region KMS CMK ARN for secondary region replication"
+        },
+        "/enterprise/security/kms/cross-region-dr-key-replica-arn": {
+          "type": "string",
+          "description": "Replica multi-region KMS CMK ARN in secondary DR region (synchronized key policy)"
         },
         "/enterprise/security/oidc/github-actions-role-arn": {
           "type": "string",
           "description": "IAM Role ARN for CI/CD OIDC workload federation"
+        },
+        "/enterprise/security/guardduty/detector-id": {
+          "type": "string",
+          "description": "Central SecOps GuardDuty Detector ID"
+        },
+        "/enterprise/security/secrets/db-rotation-lambda-arn": {
+          "type": "string",
+          "description": "Lambda ARN used to rotate database master credentials"
         }
       },
       "required": [
         "/enterprise/security/kms/general-data-key-arn",
         "/enterprise/security/kms/cross-region-dr-key-arn",
+        "/enterprise/security/kms/cross-region-dr-key-replica-arn",
         "/enterprise/security/oidc/github-actions-role-arn"
       ]
     },
@@ -93,6 +140,14 @@
           "type": "string",
           "format": "uri",
           "description": "Amazon OpenSearch Service log ingestion HTTPS endpoint"
+        },
+        "/enterprise/observability/kinesis/waf-logs-stream-arn": {
+          "type": "string",
+          "description": "Kinesis Firehose ARN for WAF traffic log ingestion"
+        },
+        "/enterprise/compliance/config/aggregator-name": {
+          "type": "string",
+          "description": "Name of AWS Config Organization Aggregator"
         }
       },
       "required": [
@@ -111,6 +166,10 @@
         "/enterprise/finops/athena/workgroup-name": {
           "type": "string",
           "description": "Athena WorkGroup dedicated to FinOps queries"
+        },
+        "/enterprise/finops/sns/anomaly-alert-topic-arn": {
+          "type": "string",
+          "description": "SNS Topic ARN for real-time cost anomaly broadcasts"
         },
         "/enterprise/finops/tags/mandatory-tag-keys": {
           "type": "array",
@@ -131,6 +190,10 @@
           "type": "string",
           "description": "RDS Proxy read-write connection endpoint"
         },
+        "/enterprise/data/aurora/reader-proxy-endpoint": {
+          "type": "string",
+          "description": "RDS Proxy read-only connection endpoint"
+        },
         "/enterprise/data/dynamodb/orders-table-arn": {
           "type": "string",
           "description": "Core orders DynamoDB table ARN"
@@ -138,6 +201,14 @@
         "/enterprise/data/msk/bootstrap-brokers-tls": {
           "type": "string",
           "description": "Kafka TLS bootstrap broker connection string"
+        },
+        "/enterprise/data/lakehouse/silver-iceberg-bucket-arn": {
+          "type": "string",
+          "description": "Cleansed Silver Lakehouse Iceberg S3 bucket"
+        },
+        "/enterprise/data/secrets/aurora-app-credentials-arn": {
+          "type": "string",
+          "description": "Secrets Manager ARN for dynamic DB user credentials"
         }
       },
       "required": [
@@ -154,14 +225,31 @@
           "format": "uri",
           "description": "EKS Kubernetes API endpoint URL"
         },
+        "/enterprise/compute/eks/oidc-issuer": {
+          "type": "string",
+          "description": "EKS OIDC issuer URL"
+        },
         "/enterprise/compute/lattice/service-network-arn": {
           "type": "string",
           "description": "Amazon VPC Lattice Service Network ARN"
+        },
+        "/enterprise/compute/lattice/gateway-api-controller-role-arn": {
+          "type": "string",
+          "description": "IAM Role ARN for AWS Gateway API Controller integration with VPC Lattice"
+        },
+        "/enterprise/compute/lattice/payment-service-dns": {
+          "type": "string",
+          "description": "Lattice-managed private domain name for internal microservice"
+        },
+        "/enterprise/compute/ecs/shared-cluster-id": {
+          "type": "string",
+          "description": "ECS Cluster ID for lightweight microservices"
         }
       },
       "required": [
         "/enterprise/compute/eks/cluster-endpoint",
-        "/enterprise/compute/lattice/service-network-arn"
+        "/enterprise/compute/lattice/service-network-arn",
+        "/enterprise/compute/lattice/gateway-api-controller-role-arn"
       ]
     },
     "Domain08_AppIntegration_Orchestration": {
@@ -171,9 +259,17 @@
           "type": "string",
           "description": "Central Enterprise EventBus ARN"
         },
+        "/enterprise/integration/sqs/orders-dlq-arn": {
+          "type": "string",
+          "description": "Shared Dead Letter Queue ARN for poisoned message capture"
+        },
         "/enterprise/integration/stepfunctions/order-saga-arn": {
           "type": "string",
           "description": "Step Functions Saga State Machine ARN"
+        },
+        "/enterprise/integration/sns/billing-fanout-topic-arn": {
+          "type": "string",
+          "description": "SNS Fan-Out Topic ARN for billing event broadcast"
         }
       },
       "required": [
@@ -191,11 +287,20 @@
         "/enterprise/edge/cloudfront/distribution-id": {
           "type": "string",
           "description": "Primary public CloudFront Distribution ID"
+        },
+        "/enterprise/edge/route53/public-zone-id": {
+          "type": "string",
+          "description": "Authoritative Route 53 Public Hosted Zone ID"
+        },
+        "/enterprise/edge/acm/global-wildcard-cert-arn": {
+          "type": "string",
+          "description": "ACM SSL/TLS Certificate ARN (us-east-1)"
         }
       },
       "required": [
         "/enterprise/edge/waf/global-webacl-arn",
-        "/enterprise/edge/cloudfront/distribution-id"
+        "/enterprise/edge/cloudfront/distribution-id",
+        "/enterprise/edge/route53/public-zone-id"
       ]
     },
     "Domain10_AIML_Inference_Guardrails": {
@@ -205,19 +310,42 @@
           "type": "string",
           "description": "Bedrock Guardrail ID enforcing enterprise safety"
         },
+        "/enterprise/ai/bedrock/guardrail-version": {
+          "type": "string",
+          "description": "Production version of the Bedrock Guardrail (e.g., '1' or 'DRAFT')"
+        },
+        "/enterprise/ai/bedrock/inference-profile-sonnet-arn": {
+          "type": "string",
+          "description": "Bedrock Cross-Region Inference Profile ARN for Claude 3.5 Sonnet"
+        },
         "/enterprise/ai/rag/knowledge-base-id": {
           "type": "string",
           "description": "Bedrock Knowledge Base ID for document RAG"
+        },
+        "/enterprise/ai/sagemaker/fraud-endpoint-name": {
+          "type": "string",
+          "description": "Real-time SageMaker fraud inference endpoint name"
+        },
+        "/enterprise/ai/privatelink/bedrock-vpce-id": {
+          "type": "string",
+          "description": "PrivateLink VPC Endpoint ID for Bedrock runtime"
         }
       },
       "required": [
         "/enterprise/ai/bedrock/guardrail-id",
+        "/enterprise/ai/bedrock/guardrail-version",
+        "/enterprise/ai/bedrock/inference-profile-sonnet-arn",
         "/enterprise/ai/rag/knowledge-base-id"
       ]
     },
     "Domain11_DisasterRecovery_Resilience": {
       "type": "object",
       "properties": {
+        "/enterprise/dr/arc/cluster-endpoints": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" },
+          "description": "5-region ARC cluster endpoint URIs for high-availability routing control consensus"
+        },
         "/enterprise/dr/arc/primary-routing-control-arn": {
           "type": "string",
           "description": "Route 53 ARC Routing Control ARN for Primary Region"
@@ -229,9 +357,14 @@
         "/enterprise/dr/backup/central-vault-arn": {
           "type": "string",
           "description": "Air-gapped AWS Backup Central Vault ARN"
+        },
+        "/enterprise/dr/drs/staging-area-subnet-id": {
+          "type": "string",
+          "description": "Low-cost staging subnet in target DR region"
         }
       },
       "required": [
+        "/enterprise/dr/arc/cluster-endpoints",
         "/enterprise/dr/arc/primary-routing-control-arn",
         "/enterprise/dr/arc/secondary-routing-control-arn",
         "/enterprise/dr/backup/central-vault-arn"

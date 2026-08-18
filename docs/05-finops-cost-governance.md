@@ -7,18 +7,18 @@ The FinOps & Cost Governance domain provides automated cost attribution, real-ti
 
 The domain boundary encapsulates:
 - **Enterprise Tag Governance & Enforcement**: AWS Organizations Tag Policies enforcing mandatory cost allocation tags (`CostCenter`, `Environment`, `Owner`, `ApplicationID`, `BusinessUnit`) paired with automated SCPs that deny non-compliant resource creation.
-- **Cost & Usage Data Pipeline (CUR 2.0 / Data Exports)**: AWS Cost and Usage Report 2.0 (CUR) delivery into Parquet format in an S3 Data Analytics bucket, transformed via AWS Glue and queryable via Amazon Athena.
+- **Cost & Usage Data Pipeline (CUR 2.0 / Data Exports)**: AWS Cost and Usage Report 2.0 (CUR) delivery into Parquet format with AWS Glue Partition Projection and sub-second Amazon Athena queries.
 - **Hierarchical Cost Allocation & Taxonomy**: AWS Cost Categories organizing accounts, tags, and chargeback models into structured business hierarchies (e.g., Platform Engineering, Digital Banking, Customer Success).
-- **Proactive Budgeting & Guardrail Controls**: AWS Budgets with programmatic notifications to Slack/Teams and auto-enforcing AWS Budgets Actions (e.g., applying restrictive SCPs or revoking IAM rights on test accounts when thresholds exceed 100%).
+- **Proactive Budgeting & Scoped Guardrail Controls**: AWS Budgets with programmatic notifications and auto-enforcing AWS Budgets Actions strictly scoped to non-production/sandbox environments.
 - **AI-Powered Anomaly Detection**: AWS Cost Anomaly Detection with root-cause analysis models sending alerts to engineering leads via SNS/EventBridge.
 
 ### 1.2 Core AWS Services & Modern Capabilities
 - **AWS Cost and Usage Report 2.0 (AWS Data Exports)**: Native Apache Parquet export with sub-hourly granularity and split cost allocation data for Amazon EKS container workloads.
+- **AWS Glue Data Catalog with Partition Projection**: Eliminates metadata scan overhead on multi-year CUR Athena datasets.
 - **AWS Cost Categories**: Multi-dimensional rule-based categorization handling shared cost splits (e.g., allocating 20% of Transit Gateway spend to Business Unit A, 80% to Business Unit B).
 - **AWS Cost Anomaly Detection**: Machine learning evaluations detecting unexpected spend spikes with root-cause identification down to account, service, and region.
-- **AWS Budgets & Budget Actions**: Automated financial threshold alarms with target action integration (IAM policy attachment, EC2 stop, SCP application).
+- **AWS Budgets & Budget Actions**: Automated financial threshold alarms with scoped enforcement on dev/sandbox accounts.
 - **AWS Organizations Tag Policies**: Organization-wide tag spelling and case-sensitivity enforcement.
-- **AWS Compute Optimizer & Rightsizing Pipelines**: ML-driven right-sizing recommendations for EC2, EBS, Lambda, and ECS/EKS tasks.
 
 ---
 
@@ -47,7 +47,7 @@ terraform-aws-finops-cost-governance/
 │   ├── cur-data-export-pipeline/
 │   │   ├── data_exports.tf
 │   │   ├── s3_cur_vault.tf
-│   │   ├── glue_crawler.tf
+│   │   ├── glue_partition_projection.tf
 │   │   ├── athena_workgroup.tf
 │   │   └── outputs.tf
 │   ├── cost-categories-baseline/
@@ -61,7 +61,7 @@ terraform-aws-finops-cost-governance/
 │   │   └── outputs.tf
 │   ├── enterprise-budgets/
 │   │   ├── org_budgets.tf
-│   │   ├── budget_actions.tf
+│   │   ├── scoped_budget_actions.tf
 │   │   ├── sns_notifications.tf
 │   │   └── outputs.tf
 │   └── compute-optimizer-org/
@@ -95,10 +95,6 @@ terraform-aws-finops-cost-governance/
 - **Upstream Dependencies**: Domain 1 (`terraform-aws-landing-zone-network-fabric` for Org Root), Domain 3 (`terraform-aws-central-identity-kms-security` for KMS CMKs).
 - **Downstream Consumers**: All Workload Domains (6 through 10) to inherit standardized cost allocation tags and EKS split-cost allocation rules.
 
-#### IAM Baseline Assumptions:
-- `AWSAccelerator-FinOpsAdminRole` with permissions to configure AWS Data Exports, Cost Categories, Budgets, and Glue Data Catalogs in the Payer Account.
-- S3 Bucket Policy grants `billingreports.amazonaws.com` write access with server-side KMS encryption.
-
 ---
 
 ## 3. Architecture Topology Diagram
@@ -123,14 +119,14 @@ flowchart TB
     subgraph FinOps_Analytics_Account["FinOps & BI Analytics Account"]
         subgraph Data_Lake_FinOps["FinOps Lakehouse Storage"]
             S3_CUR_Bucket["S3 CUR Data Vault (Parquet Formatted)"]
-            Glue_Catalog["AWS Glue Data Catalog & Crawler"]
+            Glue_Projection["AWS Glue Catalog (Partition Projection)"]
             Athena_Engine["Amazon Athena (FinOps WorkGroup)"]
         end
 
         subgraph Visualization_FinOps["Executive Dashboards & Automation"]
             QuickSight_Dashboards["Amazon QuickSight / Tableau Dashboards"]
             FinOps_EventBridge["Amazon EventBridge (FinOps Bus)"]
-            Budget_Action_Lambda["Budget Action Auto-Remediation Lambda"]
+            Budget_Action_Lambda["Scoped Budget Action Lambda (Non-Prod Only)"]
         end
     end
 
@@ -139,14 +135,18 @@ flowchart TB
         PagerDuty_SecOps["PagerDuty / Escalation Webhook"]
     end
 
-    subgraph Workload_Accounts_Org["Workload Accounts (Prod / Dev / Sandbox)"]
-        Workload_EKS["EKS Clusters (Split-Cost Allocation Enabled)"]
-        Workload_Resources["EC2 / RDS / Lambda Workloads"]
+    subgraph Workload_Accounts_Org["Workload Accounts"]
+        subgraph Non_Prod_Sandbox["Non-Prod & Sandbox Accounts"]
+            Sandbox_Resources["Dev / Test Compute Fleet"]
+        end
+        subgraph Prod_Accounts["Production Accounts (Protected from Stop Actions)"]
+            Prod_Workloads["Production Compute & Data"]
+        end
     end
 
     %% CUR Delivery Flow
     CUR_Export -->|Automated Hourly Parquet Delivery| S3_CUR_Bucket
-    S3_CUR_Bucket --> Glue_Catalog --> Athena_Engine --> QuickSight_Dashboards
+    S3_CUR_Bucket --> Glue_Projection --> Athena_Engine --> QuickSight_Dashboards
 
     %% Anomaly and Budget Flows
     Anomaly_Detection -->|Anomaly Findings > $500| FinOps_EventBridge
@@ -155,11 +155,11 @@ flowchart TB
     FinOps_EventBridge --> Slack_Teams_FinOps
     FinOps_EventBridge --> Budget_Action_Lambda
     
-    %% Budget Actions Enforcement
-    Budget_Action_Lambda -->|Apply Restrictive SCP / Stop Sandbox EC2| Workload_Accounts_Org
+    %% Budget Actions Enforcement (Scoped)
+    Budget_Action_Lambda -->|Apply Restrictive SCP / Stop EC2| Sandbox_Resources
 
     %% Tag Enforcement
-    Tag_Policies -.->|Enforce CostCenter & AppID| Workload_Resources
+    Tag_Policies -.->|Enforce CostCenter & AppID| Workload_Accounts_Org
 ```
 
 ---
@@ -168,28 +168,26 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Data Isolation*: Financial and billing analytics data resides in a dedicated FinOps Analytics account, decoupled from the Management/Payer account, adhering to least privilege.
-  - *Restricted Athena Access*: Data analyst IAM roles are constrained via row-level and column-level security in Amazon QuickSight / Athena Lake Formation permissions.
+  - *Data Isolation*: Financial and billing analytics data resides in a dedicated FinOps Analytics account, decoupled from the Management/Payer account.
+  - *Scoped Action Guardrail*: Budget action automation is strictly isolated to Dev/Sandbox OUs, eliminating operational risks to Production.
 - **Reliability**:
-  - *Automated CUR 2.0 Ingestion*: Direct Apache Parquet export eliminates brittle Python/Lambda unzipping scripts and CSV-to-Parquet conversion pipelines, ensuring 99.99% data pipeline reliability.
-  - *Decoupled Anomaly Alerting*: Multi-channel alerting (EventBridge -> SNS -> Slack/PagerDuty) guarantees notifications survive endpoint failures.
+  - *Athena Partition Projection*: Eliminates Glue metadata scan bottlenecks, guaranteeing sub-second queries across years of historical CUR data.
+  - *Decoupled Anomaly Alerting*: Multi-channel alerting (EventBridge -> SNS -> Slack/PagerDuty) guarantees delivery.
 - **Operational Excellence**:
-  - *EKS Split-Cost Allocation*: Native split cost data surfaces pod-level CPU and memory consumption attributed to specific Kubernetes namespaces and labels directly in the CUR.
-  - *Automated Tag Remediation*: Pre-commit hooks in IaC repositories combine with AWS Config rules to flag untagged resources within 5 minutes of creation.
+  - *EKS Split-Cost Allocation*: Surfaces container CPU and memory consumption attributed to specific Kubernetes namespaces and labels directly in the CUR.
 - **Cost Optimization**:
-  - *Athena Query Partitioning*: CUR Parquet datasets partitioned by `year`, `month`, and `account_id` reduce Athena query scan volumes by over 90%, slashing ad-hoc query costs.
-  - *Commitment Strategy*: AWS Cost Anomaly Detection monitors Savings Plans and Reserved Instance coverage/utilization, alerting before commitment expirations occur.
+  - *Athena Query Optimization*: CUR Parquet datasets partitioned with Projection reduce Athena query scan volumes by over 90%.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
-#### Risk 1: Uncontrolled Serverless / AI Inference Cost Runaway
-- **Failure Mechanism**: A recursive Lambda invocation bug or unthrottled Bedrock model inference endpoint generates millions of requests over a weekend, racking up tens of thousands of dollars before standard daily billing summaries reflect the surge.
+#### Risk 1: Athena Full-Bucket Scan Cost Runaway on Historical CUR Data
+- **Failure Mechanism**: BI analysts querying historical billing records trigger multi-terabyte unpartitioned scans, accumulating unexpected Athena query charges.
 - **Mitigation Strategy**:
-  1. Deploy AWS Cost Anomaly Detection with a low threshold ($100 - $500 impact) linked directly to high-priority PagerDuty / Slack webhooks.
-  2. Implement concurrency limits on AWS Lambda (`ReservedConcurrentExecutions`) and strict AWS Bedrock usage quotas / Application Load Balancer rate limiting.
+  1. Enforce AWS Glue Partition Projection on `year` and `month` in the Athena Data Catalog table.
+  2. Implement an Athena WorkGroup query data cap (e.g., maximum 50GB scanned per query).
 
 #### Risk 2: FinOps Chargeback Distortion via Missing or Non-Standard Tags
-- **Failure Mechanism**: Spoke teams provision infrastructure with slight tag variations (`cost_center` vs `CostCenter` vs `cost-center`), causing shared platform costs to fall into unallocated buckets and distorting financial unit-economics.
+- **Failure Mechanism**: Spoke teams provision infrastructure with tag variations (`cost_center` vs `CostCenter`), misallocating shared platform costs.
 - **Mitigation Strategy**:
   1. Implement AWS Organizations Tag Policies with strict case enforcement.
-  2. Configure AWS Cost Categories with regex normalization rules to aggregate historical variations while Terraform pipelines enforce exact casing on all new commits.
+  2. Configure AWS Cost Categories with regex normalization rules.

@@ -8,15 +8,15 @@ The Application Integration & Asynchronous Orchestration domain provides decoupl
 The domain boundary encapsulates:
 - **Centralized & Mesh Event Streaming (Amazon EventBridge)**: Custom Organization Event Buses, Schema Registry with automated schema discovery, content-based rule filtering, archive & replay capabilities, and cross-account event routing.
 - **Enterprise Messaging & Buffering (Amazon SQS & SNS)**: Standard and FIFO Queues with Dead Letter Queues (DLQs), server-side KMS encryption, SNS Topic Fan-Out patterns, and message filtering policies.
-- **Distributed Workflow State Machines (AWS Step Functions)**: Express and Standard State Machines orchestrating long-running transactional business workflows (Saga pattern), automated error handling, retries with exponential backoff, and human-in-the-loop task tokens.
-- **API & Event Ingestion Gateways (Amazon API Gateway & AppSync)**: REST/HTTP API Gateways and GraphQL APIs integrating directly with EventBridge and SQS without compute intermediaries.
+- **Distributed Workflow State Machines (AWS Step Functions)**: Express and Standard State Machines orchestrating long-running transactional business workflows (Saga pattern) with `MaxConcurrency` controls protecting downstream databases and model APIs.
+- **Point-to-Point Transformations & Automated Redrive (EventBridge Pipes)**: Seamless source-to-target streaming and automated SQS DLQ redrive pipelines.
 
 ### 1.2 Core AWS Services & Modern Capabilities
-- **Amazon EventBridge (Pipes & Schema Registry)**: Point-to-point integrations between sources (SQS, DynamoDB Streams, Kinesis) and targets with built-in filtering and transformation.
-- **EventBridge Event Replay & Archive**: Ability to replay historical event streams back to event buses for disaster recovery or bug backfilling.
-- **AWS Step Functions (Distributed Map & Saga Pattern)**: High-concurrency workflow orchestration executing millions of parallel tasks with state persistence.
-- **Amazon SQS FIFO & High-Throughput Mode**: Exactly-once message processing with deduplication IDs and up to 70,000 messages per second per FIFO queue with batching.
-- **Amazon SNS Message Data Protection**: Real-time inspection and redaction of PII (credit cards, tax IDs) in transit across SNS notification topics.
+- **Amazon EventBridge (Pipes & Schema Registry)**: Point-to-point integrations and automated DLQ message redrive workflows.
+- **EventBridge Event Replay & Archive**: 30-day replay window for disaster recovery and bug remediation.
+- **AWS Step Functions (Distributed Map with Concurrency Governance)**: High-concurrency workflow orchestration executing parallel tasks with bounded concurrency to prevent downstream database starvation.
+- **Amazon SQS FIFO & High-Throughput Mode**: Exactly-once message processing with deduplication IDs and up to 70,000 TPS.
+- **Amazon SNS Message Data Protection**: Real-time inspection and redaction of PII in transit.
 
 ---
 
@@ -57,20 +57,22 @@ terraform-aws-application-integration-orchestration/
 │   ├── step-functions-saga/
 │   │   ├── main.tf
 │   │   ├── state_machine.json
+│   │   ├── concurrency_limits.tf
 │   │   ├── iam_roles.tf
 │   │   ├── logging.tf
 │   │   └── outputs.tf
-│   └── eventbridge-pipes-integration/
+│   └── eventbridge-pipes-redrive/
 │       ├── main.tf
 │       ├── transformations.tf
+│       ├── dlq_redrive.tf
 │       └── outputs.tf
 ├── live/
 │   ├── integration-hub-prod/
 │   │   ├── terragrunt.hcl
 │   │   └── main.tf
 │   └── integration-hub-nonprod/
-│       ├── terragrunt.hcl
-│       └── main.tf
+│   │   ├── terragrunt.hcl
+│   │   └── main.tf
 ├── tests/
 │   └── event_routing_test.go
 ├── versions.tf
@@ -90,10 +92,6 @@ terraform-aws-application-integration-orchestration/
 #### Remote State & Inter-Module Dependencies:
 - **Upstream Dependencies**: Domain 3 (`terraform-aws-central-identity-kms-security` for KMS CMKs for SQS/SNS encryption), Domain 4 (Central CloudWatch Logs & X-Ray Tracing).
 - **Downstream Consumers**: Domain 7 (Compute/Lambda/EKS microservice subscribers), Domain 10 (AI Pipeline Orchestration), Domain 11 (DR Event Replays).
-
-#### IAM Baseline Assumptions:
-- EventBridge Bus Policy allows `events:PutEvents` restricted to principals with `aws:PrincipalOrgID` matching the corporate Organization ID.
-- SQS Queue Policies require `aws:SecureTransport` (HTTPS) and enforce KMS key decryption permissions.
 
 ---
 
@@ -126,10 +124,11 @@ flowchart TB
             SQS_Fraud["SQS Queue: Real-time Fraud Detection (Standard)"]
             
             Central_DLQ["Central Dead Letter Queue (SQS Dead-Letter Store)"]
+            EB_Pipes_Redrive["EventBridge Pipes (Automated Safe DLQ Redrive)"]
         end
 
         subgraph Saga_Workflow_Engine["Distributed Saga State Machine (AWS Step Functions)"]
-            SFN_Order_Saga["Order Fulfillment Saga State Machine"]
+            SFN_Order_Saga["Order Fulfillment Saga State Machine (MaxConcurrency Bounded)"]
             
             subgraph Saga_Steps["Saga Compensation Logic"]
                 Step_Reserve_Stock["1. Reserve Stock"]
@@ -165,9 +164,10 @@ flowchart TB
     SQS_Billing --> Billing_Worker
     SQS_Fraud --> Fraud_ML_Pipeline
 
-    %% DLQ Handling
+    %% DLQ Handling & Automated Redrive
     SQS_Fulfillment -.->|MaxReceiveCount=3 Exceeded| Central_DLQ
     SQS_Billing -.->|MaxReceiveCount=3 Exceeded| Central_DLQ
+    Central_DLQ --> EB_Pipes_Redrive --> SQS_Fulfillment
 
     %% Step Functions Saga flow
     SFN_Order_Saga --> Step_Reserve_Stock --> Step_Process_Card
@@ -182,27 +182,25 @@ flowchart TB
 ### 4.1 Well-Architected Assessment
 - **Security**:
   - *SNS Message Data Protection*: Built-in pattern-matching identifiers detect and redact sensitive payment card numbers (PCI-DSS) and social security numbers before message delivery to subscriber queues.
-  - *Strict SigV4 Org Bus Policies*: EventBridge buses only accept events from verified accounts within the organization, mitigating unauthorized event injection.
+  - *Strict SigV4 Org Bus Policies*: EventBridge buses only accept events from verified accounts within the organization.
 - **Reliability**:
-  - *Saga Pattern Distributed Compensation*: Step Functions state machines coordinate distributed microservices with automated rollback and compensation actions (e.g., releasing inventory if payment authorization fails).
-  - *Automated Dead Letter Queueing & Alerting*: All SQS queues and EventBridge rules are paired with DLQs; CloudWatch alarms trigger automated runbooks when DLQ depth exceeds zero.
+  - *Saga Pattern Distributed Compensation*: Coordinates distributed microservices with automated rollback and compensation actions.
+  - *Automated DLQ Redrive via Pipes*: Enables zero-downtime message inspection, sanitization, and automated replay.
 - **Operational Excellence**:
-  - *EventBridge Replay Capabilities*: Enables instant replay of past events during bug fixes or data lake backfills without disturbing live operational systems.
-  - *Schema Registry Integration*: Auto-generates strongly-typed TypeScript and Java models directly from event streams into developer CI/CD pipelines.
+  - *EventBridge Replay Capabilities*: Enables instant replay of past events during bug fixes without disturbing live operational systems.
 - **Cost Optimization**:
-  - *EventBridge Content-Based Filtering*: Discards irrelevant events at the event bus layer before invoking expensive downstream compute, saving millions of unnecessary Lambda invocations.
-  - *SQS Long Polling (WaitTimeSeconds = 20)*: Minimizes empty receive requests, cutting SQS API billing by up to 90% compared to short polling.
+  - *EventBridge Content-Based Filtering*: Discards irrelevant events at the event bus layer before invoking expensive downstream compute.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
 #### Risk 1: Poison Pill Messages Inducing Infinite Lambda Retry Storms
-- **Failure Mechanism**: A malformed message with invalid JSON schema enters an SQS queue driving a Lambda consumer. The Lambda crashes repeatedly, retrying indefinitely and exhausting concurrency pools while locking the queue.
+- **Failure Mechanism**: A malformed message enters an SQS queue driving a Lambda consumer. The Lambda crashes repeatedly, retrying indefinitely and exhausting concurrency pools.
 - **Mitigation Strategy**:
   1. Enforce strict `maxReceiveCount = 3` on all SQS queues, routing failed payloads to a dedicated Dead Letter Queue (DLQ).
-  2. Implement SQS Redrive Policy paired with EventBridge Pipes to safely inspect and redrive corrected messages from DLQs back into the source queue.
+  2. Implement SQS Redrive Policy paired with EventBridge Pipes to safely redrive corrected messages.
 
-#### Risk 2: Out-of-Order Message Processing in High-Throughput FIFO Queues
-- **Failure Mechanism**: Microservices publishing to SQS FIFO use generic `MessageGroupId` values (e.g., static region strings instead of granular `CustomerID`), causing sequential serialization of all messages across the entire enterprise, creating massive queue latency backlogs.
+#### Risk 2: Step Functions Distributed Map Database Starvation
+- **Failure Mechanism**: Unbounded parallel tasks spawn thousands of concurrent transactions against Aurora Serverless, exhausting connection pools.
 - **Mitigation Strategy**:
-  1. Enforce high-cardinality `MessageGroupId` attributes (e.g., `TenantID_EntityID`) in producer validation contracts.
-  2. Enable SQS FIFO High-Throughput mode to scale partitioning dynamically up to 70,000 TPS.
+  1. Enforce explicit `MaxConcurrency` attributes in Step Functions Distributed Map state definitions.
+  2. Integrate RDS Proxy connection queuing to absorb burst concurrency.

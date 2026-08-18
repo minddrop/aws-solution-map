@@ -6,19 +6,19 @@
 The Data Persistence, Streaming & Lakehouse Foundations domain establishes the core multi-model database tier, real-time event streaming pipelines, and unified lakehouse architecture. It delivers sub-millisecond key-value caching, relational transactional ACID consistency, petabyte-scale analytical query engines, and centralized data governance.
 
 The domain boundary encapsulates:
-- **Relational OLTP & Global Data Stores**: Amazon Aurora Serverless v2 (PostgreSQL / MySQL) with Multi-AZ clusters, Aurora Global Database for cross-region disaster recovery, and RDS Proxy for connection pooling.
-- **Ultra-Low Latency NoSQL & In-Memory Caching**: Amazon DynamoDB with Global Tables (active-active multi-region), Point-In-Time Recovery (PITR), and Amazon ElastiCache for Redis / Dragonfly / MemoryDB for distributed microservice session and query caching.
-- **Real-Time Streaming Ingestion**: Amazon Managed Streaming for Apache Kafka (MSK Serverless / Provisioned) and Amazon Kinesis Data Streams with partition key hashing and auto-scaling.
-- **Lakehouse Foundation & Modern Storage Formats**: Amazon S3 Data Lake structured in Medallion Architecture (Bronze: Raw, Silver: Cleansed, Gold: Aggregated) leveraging open table formats (Apache Iceberg / Delta Lake).
-- **Data Cataloging & Governance**: AWS Glue Data Catalog, AWS Lake Formation (fine-grained table, column, and row-level access controls), and Amazon Athena Serverless for SQL analytics.
+- **Relational OLTP & Global Data Stores**: Amazon Aurora Serverless v2 (PostgreSQL / MySQL) with Multi-AZ clusters, Aurora Global Database for cross-region disaster recovery, and regional RDS Proxies (primary and standby DR).
+- **Ultra-Low Latency NoSQL & In-Memory Caching**: Amazon DynamoDB with Global Tables (active-active multi-region), Point-In-Time Recovery (PITR), and Amazon ElastiCache for Redis for distributed microservice caching.
+- **Real-Time Streaming Ingestion**: Amazon Managed Streaming for Apache Kafka (MSK Serverless / Provisioned with Tiered Storage) with native MSK Multi-VPC PrivateLink connectivity.
+- **Lakehouse Foundation & Modern Storage Formats**: Amazon S3 Data Lake structured in Medallion Architecture (Bronze, Silver, Gold) with Apache Iceberg ACID open table format and automated compaction jobs.
+- **Data Cataloging & Governance**: AWS Glue Data Catalog, AWS Lake Formation (Tag-Based Access Control LF-TBAC), and Amazon Athena Serverless.
 
 ### 1.2 Core AWS Services & Modern Capabilities
-- **Amazon Aurora Serverless v2**: Instant scaling in fine-grained Aurora Capacity Units (ACUs from 0.5 to 128 ACU) with zero connection drops.
-- **Amazon DynamoDB (Global Tables & PITR)**: Multi-region active-active replication with sub-second replication latency and continuous backups.
-- **Amazon RDS Proxy & Aurora Connection Pooling**: Serverless connection multiplexing shielding databases from Lambda/container scale surges.
-- **Amazon MSK (Apache Kafka) & MSK Connect**: Managed Kafka with Tiered Storage (S3 backing), IAM authentication, and schema registry.
-- **AWS Lake Formation**: Tag-based access control (LF-TBAC), data filtering, and centralized cross-account sharing via AWS RAM.
-- **Apache Iceberg on AWS S3 & Glue**: ACID transactions, schema evolution, partition evolution, and time-travel querying on Amazon S3 data lakes.
+- **Amazon Aurora Serverless v2**: Instant scaling in fine-grained ACUs (0.5 to 128 ACU) with zero connection drops.
+- **Amazon RDS Proxy**: Connection multiplexing with standby proxy instances pre-configured in DR regions.
+- **Amazon DynamoDB (Global Tables & PITR)**: Multi-region active-active replication with sub-second replication latency.
+- **Amazon MSK & Multi-VPC PrivateLink**: Managed Kafka with Tiered Storage (S3 backing), IAM authentication, and cross-account PrivateLink access.
+- **AWS Lake Formation**: LF-TBAC, dynamic column masking, and centralized cross-account sharing via AWS RAM.
+- **Apache Iceberg on AWS S3 & Glue**: ACID transactions, schema evolution, and automated compaction maintenance.
 
 ---
 
@@ -43,7 +43,8 @@ terraform-aws-data-persistence-lakehouse/
 │   ├── aurora-serverless-v2/
 │   │   ├── main.tf
 │   │   ├── cluster_parameter_groups.tf
-│   │   ├── rds_proxy.tf
+│   │   ├── rds_proxy_primary.tf
+│   │   ├── rds_proxy_standby_dr.tf
 │   │   ├── auto_scaling.tf
 │   │   └── outputs.tf
 │   ├── dynamodb-global-tables/
@@ -59,14 +60,14 @@ terraform-aws-data-persistence-lakehouse/
 │   ├── msk-kafka-cluster/
 │   │   ├── main.tf
 │   │   ├── serverless_msk.tf
+│   │   ├── privatelink_connectivity.tf
 │   │   ├── client_auth.tf
-│   │   ├── schema_registry.tf
 │   │   └── outputs.tf
 │   ├── s3-lakehouse-medallion/
 │   │   ├── raw_bronze.tf
 │   │   ├── cleansed_silver.tf
 │   │   ├── analytics_gold.tf
-│   │   ├── lifecycle_policies.tf
+│   │   ├── iceberg_compaction_jobs.tf
 │   │   └── outputs.tf
 │   └── lakeformation-governance/
 │       ├── main.tf
@@ -78,8 +79,8 @@ terraform-aws-data-persistence-lakehouse/
 │   │   ├── terragrunt.hcl
 │   │   └── main.tf
 │   └── data-platform-nonprod/
-│       ├── terragrunt.hcl
-│       └── main.tf
+│   │   ├── terragrunt.hcl
+│   │   └── main.tf
 ├── tests/
 │   └── rds_proxy_failover_test.go
 ├── versions.tf
@@ -102,17 +103,13 @@ terraform-aws-data-persistence-lakehouse/
 - **Upstream Dependencies**: Domain 1 (`terraform-aws-landing-zone-network-fabric` for Spoke Database Subnets), Domain 3 (`terraform-aws-central-identity-kms-security` for Storage CMKs).
 - **Downstream Consumers**: Domain 7 (Compute/EKS application workloads), Domain 8 (EventBridge & Step Functions ETL), Domain 10 (SageMaker ML Training/Inference), Domain 11 (Cross-Region DR).
 
-#### IAM Baseline Assumptions:
-- IAM Database Authentication enabled on Aurora clusters (`rds-db:connect`).
-- MSK cluster strictly requires IAM Access Control (`kafka-cluster:Connect`, `kafka-cluster:DescribeTopic`).
-
 ---
 
 ## 3. Architecture Topology Diagram
 
 ```mermaid
 flowchart TB
-    subgraph Compute_and_Ingestion["Application & Ingestion Tier (Domain 7 / External)"]
+    subgraph Compute_and_Ingestion["Application Tier (Domain 7 / External)"]
         Microservices["EKS Microservices / Fargate Tasks"]
         Serverless_Lambdas["Event-Driven AWS Lambda Functions"]
         IoT_Clickstream["Streaming Clients / Webhooks"]
@@ -126,25 +123,27 @@ flowchart TB
         end
 
         subgraph Relational_OLTP_Tier["Relational ACID Tier"]
-            RDS_Proxy["Amazon RDS Proxy (Connection Pooler & Secrets Integration)"]
+            RDS_Proxy["Amazon RDS Proxy (Primary Connection Pooler)"]
+            RDS_Proxy_DR["Standby RDS Proxy (Pre-provisioned in us-west-2)"]
             Aurora_Writer["Aurora Serverless v2 (Primary Writer - AZ-A)"]
             Aurora_Reader_1["Aurora Serverless v2 (Reader Replica - AZ-B)"]
             Aurora_Reader_2["Aurora Serverless v2 (Reader Replica - AZ-C)"]
         end
 
         subgraph Realtime_Streaming_Fabric["Event Streaming Backbone"]
-            MSK_Kafka["Amazon MSK (Apache Kafka Multi-AZ)"]
+            MSK_Kafka["Amazon MSK (Multi-VPC PrivateLink + Tiered Storage)"]
             MSK_Connect["MSK Connect (Iceberg Sink)"]
         end
 
-        subgraph Medallion_Lakehouse_Architecture["Enterprise S3 Lakehouse (Apache Iceberg Format)"]
-            S3_Bronze["Bronze S3: Raw Ingestion (Immutable Event Log)"]
+        subgraph Medallion_Lakehouse_Architecture["Enterprise S3 Lakehouse (Apache Iceberg)"]
+            S3_Bronze["Bronze S3: Raw Ingestion"]
             S3_Silver["Silver S3: Cleansed & Partitioned (Iceberg ACID)"]
             S3_Gold["Gold S3: Curated Analytics Data Marts (Iceberg ACID)"]
+            Glue_Compaction["Glue Compaction Job (rewrite_data_files)"]
         end
 
         subgraph Governance_Analytics["Governance & Query Engine"]
-            Lake_Formation["AWS Lake Formation (LF-TBAC & Row/Column Security)"]
+            Lake_Formation["AWS Lake Formation (LF-TBAC & Data Filtering)"]
             Glue_Catalog_Lake["AWS Glue Data Catalog"]
             Athena_SQL["Amazon Athena Serverless SQL Engine"]
         end
@@ -160,12 +159,12 @@ flowchart TB
     Aurora_Writer -.->|Shared Storage Replication| Aurora_Reader_1 & Aurora_Reader_2
 
     %% Streaming & ETL Flows
-    IoT_Clickstream -->|Real-Time Event Stream| MSK_Kafka
+    IoT_Clickstream -->|Real-Time Event Stream via PrivateLink| MSK_Kafka
     MSK_Kafka --> MSK_Connect --> S3_Bronze
     DDB_Global -.->|DynamoDB Streams| S3_Bronze
     
-    S3_Bronze -->|Glue PySpark ETL / EMR Serverless| S3_Silver
-    S3_Silver -->|Aggregations & Modeling| S3_Gold
+    S3_Bronze --> S3_Silver --> S3_Gold
+    Glue_Compaction -.->|Automated 512MB Bin-Packing| S3_Silver & S3_Gold
 
     %% Governance & Query
     Lake_Formation --- Glue_Catalog_Lake
@@ -179,28 +178,26 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Zero Public Accessibility*: All databases, caches, and MSK brokers reside exclusively in isolated database subnets without internet routes.
-  - *Lake Formation Fine-Grained Security*: Replaces broad S3 bucket policies with Tag-Based Access Control (LF-TBAC), dynamically masking PII columns (e.g., SSN, credit cards) based on caller IAM roles.
+  - *Zero Public Accessibility*: All databases, caches, and MSK brokers reside exclusively in isolated database subnets.
+  - *Lake Formation LF-TBAC*: Dynamically masks PII columns based on caller IAM roles.
 - **Reliability**:
-  - *Aurora Storage Layer Resilience*: 6-way storage replication across 3 AZs; survives loss of an entire AZ plus an additional disk without read/write downtime.
-  - *DynamoDB Global Tables Multi-Region Active-Active*: Instant failover capability with automated conflict resolution based on timestamp ordering.
+  - *Aurora Storage Layer Resilience*: 6-way storage replication across 3 AZs; survives loss of an AZ plus a disk.
+  - *Standby RDS Proxy Pre-Provisioning*: Eliminates connection surge latency during regional failover in `us-west-2`.
 - **Operational Excellence**:
-  - *Aurora Serverless v2 Dynamic Scaling*: Automatically scales compute up/down in 0.5 ACU increments in fractions of a second in response to application traffic, eliminating capacity planning guesswork.
-  - *Apache Iceberg Schema Evolution*: Enables non-breaking column additions, renames, and type promotions without full table rewrites.
+  - *Automated Iceberg Compaction*: Eliminates small-file read degradation via scheduled Glue maintenance routines.
 - **Cost Optimization**:
-  - *RDS Proxy Resource Optimization*: Reduces database connection memory overhead by multiplexing 10,000 application connections into 200 persistent backend connections.
-  - *MSK Tiered Storage*: Offloads aged Kafka topic partitions (> 24 hours) from high-cost EBS gp3 storage to low-cost Amazon S3, cutting streaming storage costs by 65%.
+  - *MSK Tiered Storage*: Offloads aged Kafka topic partitions (> 24 hours) to Amazon S3, cutting storage costs by 65%.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
-#### Risk 1: DynamoDB Partition Hotspotting & Read/Write Throttling
-- **Failure Mechanism**: Poorly chosen partition keys (e.g., ordering by `date` or single tenant ID) steer massive write traffic to a single DynamoDB partition, exceeding the 1,000 WCU / 3,000 RCU per partition limit and triggering `ProvisionedThroughputExceededException`.
+#### Risk 1: DynamoDB Partition Hotspotting
+- **Failure Mechanism**: Poorly chosen partition keys steer write traffic to a single partition, exceeding the 1,000 WCU limit.
 - **Mitigation Strategy**:
-  1. Implement synthetic partition key salting (e.g., `PartitionKey = TenantID + "_" + RandomHash(1..10)`).
-  2. Front high-frequency read keys with Amazon ElastiCache Redis or DynamoDB Accelerator (DAX) with write-through caching.
+  1. Implement synthetic partition key salting (`PartitionKey = TenantID + "_" + RandomHash(1..10)`).
+  2. Front high-frequency read keys with Amazon ElastiCache Redis.
 
-#### Risk 2: Apache Iceberg Small-File Problem in Streaming S3 Lakehouse
-- **Failure Mechanism**: High-frequency streaming writes from MSK Connect into S3 create millions of tiny 1MB Parquet files, degrading Athena query execution times from seconds to minutes due to S3 GET latency overhead.
+#### Risk 2: Apache Iceberg Small-File Degradation in Streaming Ingestion
+- **Failure Mechanism**: High-frequency streaming writes from MSK create millions of 1MB files, degrading query times.
 - **Mitigation Strategy**:
-  1. Schedule automated AWS Glue Iceberg compaction jobs (`CALL system.rewrite_data_files()`) to bin-pack small files into 512MB optimized chunks.
-  2. Implement automated snapshot expiration and orphan file removal in Lake Formation to prevent S3 metadata bloat.
+  1. Schedule automated AWS Glue Iceberg compaction jobs (`CALL system.rewrite_data_files()`) to bin-pack small files into 512MB chunks.
+  2. Configure snapshot expiration and orphan file removal in Lake Formation.

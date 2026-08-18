@@ -7,10 +7,10 @@ The Hybrid & Multi-Cloud Connectivity domain establishes deterministic, enterpri
 
 The domain boundary encapsulates:
 - **Dedicated Physical Interconnects**: AWS Direct Connect (DX) Dedicated Connections (10Gbps / 100Gbps) with MACsec (802.1AE) hardware encryption at the physical layer.
-- **Transit Virtual Interfaces & DX Gateway**: Multi-region DX Gateways (DXGW) attached to Transit Gateways with precise BGP Prefix filtering.
-- **IPsec Over Direct Connect & Backup Site-to-Site VPNs**: BGP-over-IPsec overlay configurations using AWS Site-to-Site VPN for in-flight cryptographic compliance (FIPS 140-3) and automated path failover via BGP AS Path prepending and MED (Multi-Exit Discriminator).
+- **Transit Virtual Interfaces & DX Gateway**: Multi-region DX Gateways (DXGW) attached to Transit Gateways and Cloud WAN with precise BGP Prefix filtering.
+- **IPsec Over Direct Connect & Backup Site-to-Site VPNs**: BGP-over-IPsec overlay configurations using AWS Site-to-Site VPN for in-flight cryptographic compliance (FIPS 140-3) and automated path failover via BGP AS Path prepending, MED, and AWS BGP community tags.
 - **AWS Cloud WAN & Global Backbone Core Network**: Modern policy-based routing using AWS Cloud WAN Global Network and Core Network Edge (CNE) attachments for automated multi-region and multi-cloud segmentation.
-- **Third-Party Multi-Cloud Routing**: BGP interconnects to Azure Virtual WAN / ExpressRoute and Google Cloud Cloud Interconnect via Cloud Exchange fabric or SD-WAN virtual network appliances (Cisco Catalyst 8000V, Fortinet FortiGate, Aruba EdgeConnect).
+- **Third-Party Multi-Cloud Routing**: BGP interconnects to Azure Virtual WAN / ExpressRoute and Google Cloud Cloud Interconnect via Cloud Exchange fabric or SD-WAN virtual network appliances.
 
 ### 1.2 Core AWS Services & Modern Capabilities
 - **AWS Direct Connect (DX)**: Dedicated 10G/100G connections with Transit VIFs and MACsec Layer 2 encryption.
@@ -18,7 +18,7 @@ The domain boundary encapsulates:
 - **AWS Cloud WAN**: Global Network Manager, Core Network Edge (CNE) routing segments (Corp-DC, Cloud-Prod, Cloud-NonProd, MultiCloud-Transit), and policy-as-code orchestration.
 - **AWS Site-to-Site VPN (Accelerated VPN)**: IPsec VPN with AWS Global Accelerator optimization and IKEv2 / AES-GCM-256 cipher suite negotiation.
 - **AWS Transit Gateway Inter-Region Peering**: Encrypted inter-region AWS backbone peering with MTU 8500 (Jumbo frames) support.
-- **BGP Dynamic Routing & Bidirectional Forwarding Detection (BFD)**: Sub-second link failure detection (asynchronous BFD intervals of 300ms x 3 detection multipliers).
+- **BGP Dynamic Routing & BFD**: Sub-second link failure detection (asynchronous BFD intervals of 300ms x 3 detection multipliers) with AWS BGP Communities (`7224:7100` / `7224:7300`).
 
 ---
 
@@ -60,16 +60,17 @@ terraform-aws-hybrid-multicloud-connectivity/
 │   │   ├── peering_routes.tf
 │   │   └── outputs.tf
 │   └── bgp-routing-policy/
-│       ├── main.tf
-│       ├── prefix_filters.tf
-│       └── outputs.tf
+│   │   ├── main.tf
+│   │   ├── prefix_filters.tf
+│   │   ├── bgp_communities.tf
+│   │   └── outputs.tf
 ├── live/
 │   ├── network-primary-region/
 │   │   ├── terragrunt.hcl
 │   │   └── main.tf
 │   └── network-secondary-region/
-│       ├── terragrunt.hcl
-│       └── main.tf
+│   │   ├── terragrunt.hcl
+│   │   └── main.tf
 ├── tests/
 │   └── bgp_convergence_test.go
 ├── versions.tf
@@ -91,10 +92,6 @@ terraform-aws-hybrid-multicloud-connectivity/
 #### Remote State & Inter-Module Dependencies:
 - **Upstream Dependencies**: Domain 1 (`terraform-aws-landing-zone-network-fabric` for TGW IDs and Network Hub Route Table IDs).
 - **Downstream Consumers**: Domain 1 (Central Egress / Spoke Routing), Domain 3 (AD/LDAP Domain Controller Interconnects), Domain 4 (Central Syslog Ingestion), Domain 11 (Cross-Region DR).
-
-#### IAM Baseline Assumptions:
-- `AWSAccelerator-DirectConnectAdminRole` granted permissions to modify DX Virtual Interfaces, DXGW Associations, and Cloud WAN Global Network policies.
-- Secrets Manager Baseline: Key `arn:aws:secretsmanager:<region>:<account>:secret:hybrid/macsec-ckn-cak-*` for Layer 2 MACsec authentication.
 
 ---
 
@@ -129,7 +126,7 @@ flowchart TB
         subgraph Cloud_WAN_Core["AWS Cloud WAN Global Network"]
             CNE_Region_1["Core Network Edge: us-east-1"]
             CNE_Region_2["Core Network Edge: us-west-2"]
-            CNE_Policy["Core Network Policy Engine (Segment: Corp-DC, Cloud-Prod)"]
+            CNE_Policy["Core Network Policy Engine (Segments: Corp-DC, Cloud-Prod)"]
         end
     end
 
@@ -161,8 +158,8 @@ flowchart TB
     DX_Conn_1 & DX_Conn_2 & DX_Conn_3 --> DXGW
     
     %% DXGW to TGWs and Cloud WAN
-    DXGW <-->|Allowed Prefixes: 10.100.0.0/16, 10.200.0.0/16| TGW_Primary
-    DXGW <-->|Allowed Prefixes: 10.100.0.0/16, 10.200.0.0/16| TGW_Secondary
+    DXGW <-->|Allowed Prefixes: 10.100.0.0/12, 10.200.0.0/12| TGW_Primary
+    DXGW <-->|Allowed Prefixes: 10.100.0.0/12, 10.200.0.0/12| TGW_Secondary
     
     %% Cloud WAN Interconnect
     Azure_Router <-->|BGP IPsec / Cloud Interconnect| CNE_Region_1
@@ -184,14 +181,14 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Layer 2 Physical Encryption*: 802.1AE MACsec on dedicated 100G Direct Connect circuits ensures line-rate encryption between enterprise customer equipment (Cisco ASR 9000 / Juniper MX) and AWS Direct Connect routers without MTU degradation.
+  - *Layer 2 Physical Encryption*: 802.1AE MACsec on dedicated 100G Direct Connect circuits ensures line-rate encryption without MTU degradation.
   - *Segmentation & Route Leak Prevention*: Explicit `allowed_prefixes` configured on Direct Connect Gateway associations prevents accidental advertisement of enterprise default routes (`0.0.0.0/0`) or RFC 1918 overlaps to on-premises WAN.
 - **Reliability**:
   - *Dual-Location, Dual-Port Redundancy*: Direct Connect resilience model adheres to the AWS DX Maximum Resiliency recommendations (two connections in Ashburn + two connections in Chicago across distinct DX chassis).
   - *BFD Sub-Second Convergence*: BFD active on all BGP peering sessions ensures failover detection in under 900ms (3 x 300ms timeout) compared to default BGP keepalive timeout of 90 seconds.
 - **Operational Excellence**:
-  - *AWS Cloud WAN Policy-as-Code*: Central JSON routing policy defines automated segment associations based on AWS resource tags (`Env=Prod` -> `segment: Cloud-Prod`), eliminating manual multi-region static route orchestrations.
-  - *CloudWatch DX Metrics*: Real-time alerts on `ConnectionBpsEgress`, `ConnectionBpsIngress`, `ConnectionErrorCount`, and `VirtualInterfaceBgpState`.
+  - *AWS Cloud WAN Policy-as-Code*: Central JSON routing policy defines automated segment associations based on AWS resource tags (`Env=Prod` -> `segment: Cloud-Prod`).
+  - *BGP Community Automation*: Uses AWS BGP communities (`7224:7100` for low preference, `7224:7300` for high preference) for deterministic path shaping.
 - **Cost Optimization**:
   - *Direct Connect vs Internet Egress*: Direct Connect data egress pricing ($0.02/GB) yields 78% savings compared to standard internet egress ($0.09/GB).
   - *Cloud WAN Core Network Edge Consolidation*: Replaces N*(N-1)/2 mesh TGW peerings with a unified multi-region core network backbone.
@@ -199,13 +196,13 @@ flowchart TB
 ### 4.2 Critical Architectural Risks & Mitigations
 
 #### Risk 1: BGP Asymmetric Routing & State Table Drops via Hybrid Multi-Pathing
-- **Failure Mechanism**: Traffic from on-premises to AWS enters via Direct Connect Link 1 (Ashburn), but return traffic from AWS chooses Direct Connect Link 2 (Chicago) due to equal-cost multi-path (ECMP) or asymmetric BGP Local Preference. Stateful firewalls on-premises drop the packets as invalid TCP ACK state.
+- **Failure Mechanism**: Traffic from on-premises to AWS enters via Direct Connect Link 1 (Ashburn), but return traffic from AWS chooses Direct Connect Link 2 (Chicago) due to ECMP or asymmetric BGP Local Preference. Stateful firewalls on-premises drop the packets.
 - **Mitigation Strategy**:
   1. Implement strict BGP attribute shaping: Advertise identical specific prefixes with BGP Multi-Exit Discriminator (MED) and AS Path prepending from the secondary data center.
   2. Configure AWS Direct Connect BGP community tags: Use AWS BGP communities (`7224:7100` for low preference, `7224:7300` for high preference) to deterministically influence AWS egress path selection.
 
 #### Risk 2: Direct Connect Gateway Prefix Limit Overflow
-- **Failure Mechanism**: AWS Direct Connect Gateway enforces a hard quota of 200 allowed prefixes advertised from AWS to on-premises. Rapid multi-account VPC onboarding without prefix aggregation causes BGP sessions to reset or drop newly provisioned VPC subnets.
+- **Failure Mechanism**: AWS Direct Connect Gateway enforces a hard quota of 200 allowed prefixes advertised from AWS to on-premises. Rapid multi-account VPC onboarding causes BGP sessions to reset.
 - **Mitigation Strategy**:
-  1. Enforce strict CIDR summarization at the IPAM root (Domain 1): Group all spoke VPCs into regional supernets (e.g., `10.100.0.0/14` for US East Workloads, `10.200.0.0/14` for US West Workloads).
+  1. Enforce strict CIDR summarization at the IPAM root: Group all spoke VPCs into regional supernets (`10.100.0.0/12` for US East, `10.200.0.0/12` for US West).
   2. Maintain a single aggregated prefix advertisement in the DXGW association contract, strictly rejecting `/24` or `/28` spoke-level route injections.

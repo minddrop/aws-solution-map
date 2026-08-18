@@ -8,8 +8,9 @@ The Multi-Account Landing Zone and Core Network Fabric establishes the secure, c
 The domain boundary encapsulates:
 - **Organizational Hierarchy & OU Topology**: Core OU (Security, Log Archive, Shared Services, Network), Workload OUs (Prod, Non-Prod, Sandbox), and Governance OUs (Policy Staging, Suspended).
 - **Core Network Backbone**: Hub-and-spoke transit topology leveraging AWS Transit Gateway (TGW) across multiple Availability Zones, centralized Inspection VPC with AWS Network Firewall (or third-party NGFW appliances), Ingress VPC, and Egress VPC.
-- **Hybrid DNS Resolution**: Centralized Amazon Route 53 Private Hosted Zones (PHZs) and Route 53 Resolver Endpoints (Inbound/Outbound) managed via Resource Access Manager (RAM).
-- **Centralized VPC Endpoint Architecture**: Consolidated Interface VPC Endpoints (AWS PrivateLink) in Shared Services/Network VPCs exposed to all spoke VPCs via Route 53 Resolver forwarding and TGW routing to prevent endpoint proliferation and cost sprawl.
+- **Enterprise DNS & Route 53 Profiles**: Centralized Route 53 Profiles aggregating Private Hosted Zones (PHZs), Resolver Rules, and DNS Firewall Rule Groups into a unified entity shared across all AWS Organization member accounts via AWS RAM, eliminating legacy 300-VPC association limits.
+- **Centralized VPC Endpoint Architecture**: Consolidated Interface VPC Endpoints (AWS PrivateLink) in Shared Services/Network VPCs exposed to all spoke VPCs via Route 53 Profiles and TGW routing to prevent endpoint proliferation and cost sprawl.
+- **Dual-Stack IPAM Hierarchy**: Comprehensive IPv4 supernet and IPv6 Global Unicast Address (GUA) management preventing IP exhaustion.
 
 ```
 +---------------------------------------------------------------------------------------+
@@ -32,12 +33,12 @@ The domain boundary encapsulates:
 
 ### 1.2 Core AWS Services & Modern Capabilities
 - **AWS Control Tower & AWS Organizations**: Multi-account lifecycle management, Account Factory for Terraform (AFT), baseline guardrails, and SCP/RCP governance.
-- **AWS Transit Gateway (TGW)**: Multi-VPC and hybrid interconnectivity with segmented Route Tables (Spoke-RT, Ingress-RT, Egress-RT, Inspection-RT).
+- **AWS Transit Gateway (TGW)**: Multi-VPC and hybrid interconnectivity with segmented Route Tables (Spoke-RT, Ingress-RT, Egress-RT, Inspection-RT) and Appliance Mode support.
+- **AWS Route 53 Profiles**: Modern DNS management construct bundling PHZs, Resolver Rules, and DNS Firewall rules into an Organization-wide RAM-shareable profile.
 - **AWS Network Firewall (NFW)**: Stateful and stateless Deep Packet Inspection (DPI), Suricata-compatible IPS/IDS rules, domain name filtering, and TLS inspection at scale.
-- **Route 53 Resolver & DNS Firewall**: Central Inbound/Outbound resolver endpoints, resolver rules RAM-shared across all accounts, and DNS Firewall domain blocklists for malware C2 prevention.
-- **AWS RAM (Resource Access Manager)**: Cross-account sharing of TGW, Subnets (VPC Sharing where applicable), Route 53 Resolver Rules, and AWS Network Firewall endpoints.
-- **AWS VPC IPAM (IP Address Manager)**: Hierarchical CIDR pool allocation, IP address tracking, and overlapping CIDR prevention across multiple AWS Regions and on-premises ranges.
-- **Resource Control Policies (RCPs)**: Modern identity-perimeter guardrails restricting resource access at the AWS Organizations boundary regardless of caller IAM policies.
+- **AWS RAM (Resource Access Manager)**: Cross-account sharing of TGW, Route 53 Profiles, Subnets, and AWS Network Firewall endpoints.
+- **AWS VPC IPAM (IP Address Manager)**: Hierarchical IPv4/IPv6 CIDR pool allocation, IP address tracking, and overlapping CIDR prevention across multiple AWS Regions and on-premises ranges.
+- **Resource Control Policies (RCPs)**: Modern identity-perimeter guardrails restricting resource access at the AWS Organizations boundary with service principal bypass exceptions (`aws:PrincipalIsAWSService`).
 
 ---
 
@@ -66,7 +67,8 @@ terraform-aws-landing-zone-network-fabric/
 │   │   └── variables.tf
 │   ├── ipam-core/
 │   │   ├── main.tf
-│   │   ├── pools.tf
+│   │   ├── pools_ipv4.tf
+│   │   ├── pools_ipv6.tf
 │   │   └── outputs.tf
 │   ├── transit-gateway/
 │   │   ├── main.tf
@@ -77,6 +79,11 @@ terraform-aws-landing-zone-network-fabric/
 │   │   ├── main.tf
 │   │   ├── network_firewall.tf
 │   │   ├── routing.tf
+│   │   └── outputs.tf
+│   ├── route53-profiles-core/
+│   │   ├── main.tf
+│   │   ├── profile_associations.tf
+│   │   ├── ram_share.tf
 │   │   └── outputs.tf
 │   ├── route53-resolver-core/
 │   │   ├── main.tf
@@ -113,6 +120,7 @@ The Landing Zone & Core Network Fabric publishes authoritative contract state to
 | `/enterprise/network/tgw/spoke-rt-id` | String | All Spoke VPC Repositories | TGW Route Table to associate spoke attachments with |
 | `/enterprise/network/dns/inbound-resolver-ips` | StringList | Hybrid Network / On-Prem DNS | Target IPs for on-premises DNS forwarding rules (`10.254.0.4,10.254.1.4`) |
 | `/enterprise/network/dns/outbound-endpoint-id` | String | Route 53 Rules Manager | Route 53 Outbound Endpoint ID for conditional forwarding |
+| `/enterprise/network/dns/r53-profile-arn` | String | All Spoke Workload Accounts | Route 53 Profile ARN shared across Org via RAM |
 | `/enterprise/network/ipam/workload-prod-pool-id` | String | Workload Prod Account VPCs | IPAM Pool ID for dynamic Spoke CIDR provisioning |
 | `/enterprise/network/ipam/workload-nonprod-pool-id` | String | Workload Non-Prod Account VPCs | IPAM Pool ID for Non-Prod Spoke CIDR provisioning |
 | `/enterprise/security/rcp/enforced-org-id` | String | Global KMS / S3 / IAM Blueprints | Organization ID enforced in Resource Control Policies |
@@ -144,16 +152,17 @@ flowchart TB
                 NFW_AZ_A["AWS Network Firewall (AZ-A)"]
                 NFW_AZ_B["AWS Network Firewall (AZ-B)"]
                 NFW_AZ_C["AWS Network Firewall (AZ-C)"]
-                TGW_Attach_Inspect["TGW Attachment (Inspection)"]
+                TGW_Attach_Inspect["TGW Attachment (Inspection - /27)"]
             end
 
             subgraph Egress_VPC["Central Egress VPC (10.254.32.0/20)"]
                 NAT_GW["NAT Gateways (Multi-AZ)"]
                 IGW["Internet Gateway"]
-                TGW_Attach_Egress["TGW Attachment (Egress)"]
+                TGW_Attach_Egress["TGW Attachment (Egress - /27)"]
             end
 
-            subgraph DNS_Hub["Central Route 53 Resolver Hub"]
+            subgraph DNS_Hub["Central Route 53 Resolver & Profiles Hub"]
+                R53_Profiles["Route 53 Profiles (RAM Shared Org-wide)"]
                 R53_Inbound["Inbound Resolver Endpoints"]
                 R53_Outbound["Outbound Resolver Endpoints"]
                 DNS_Firewall["Route 53 DNS Firewall"]
@@ -173,14 +182,14 @@ flowchart TB
         subgraph Workload_Prod_Account["Workload Prod Account (10.100.0.0/16)"]
             subgraph Prod_Spoke_VPC["Production Spoke VPC"]
                 Prod_App_Subnets["App Subnets (EKS / ECS / RDS)"]
-                TGW_Attach_Prod["TGW Attachment (Prod Spoke)"]
+                TGW_Attach_Prod["TGW Attachment (Prod Spoke - /27)"]
             end
         end
 
         subgraph Workload_NonProd_Account["Workload Non-Prod Account (10.101.0.0/16)"]
             subgraph NonProd_Spoke_VPC["Non-Production Spoke VPC"]
                 NonProd_App_Subnets["App Subnets (Dev / QA)"]
-                TGW_Attach_NonProd["TGW Attachment (Non-Prod Spoke)"]
+                TGW_Attach_NonProd["TGW Attachment (Non-Prod Spoke - /27)"]
             end
         end
 
@@ -199,8 +208,8 @@ flowchart TB
     
     TGW_PostInspect_RT -->|East-West Bound| TGW_Attach_NonProd & TGW_Attach_Shared
     
-    Prod_App_Subnets -.->|Private DNS Query| R53_Inbound
-    DNS_Hub -.-> DNS_Firewall
+    Prod_App_Subnets -.->|Private DNS Query via Profile| R53_Profiles
+    R53_Profiles --- R53_Inbound & DNS_Firewall
     Shared_Account --- TGW_Attach_Shared
 ```
 
@@ -211,13 +220,13 @@ flowchart TB
 ### 4.1 Well-Architected Assessment
 - **Security**:
   - *Perimeter Enforcement*: No public IP allocations or IGWs in workload spoke accounts. Egress is mandatorily steered through AWS Network Firewall with Suricata stateful filtering and TLS inspection.
-  - *Resource Control Policies (RCPs)*: Enforces strict data-perimeter boundaries preventing IAM credentials from accessing buckets/resources outside the enterprise organization ID (`aws:ResourceOrgID`).
+  - *Resource Control Policies (RCPs)*: Enforces strict data-perimeter boundaries (`aws:PrincipalOrgID`) with explicit AWS service principal exceptions (`aws:PrincipalIsAWSService: false`).
 - **Reliability**:
   - *Multi-AZ Symmetry*: Transit Gateway attachments, AWS Network Firewall endpoints, NAT Gateways, and Route 53 Resolver endpoints are provisioned across 3 AZs.
   - *TGW Appliance Mode*: Explicitly enabled on the Inspection VPC attachment (`appliance_mode_support = "enable"`) to prevent asymmetric routing drops during stateful packet inspection across AZs.
 - **Operational Excellence**:
-  - *IPAM CIDR Management*: Automated allocation via AWS VPC IPAM prevents RFC 1918 overlaps and minimizes human subnet calculation errors.
-  - *VPC Flow Logs*: Aggregated to central S3 bucket in Log Archive account with Parquet format and 1-minute aggregation intervals for rapid threat hunting.
+  - *Route 53 Profiles Adoption*: Bundles PHZs, DNS Firewall Rules, and Resolver Rules into a single RAM-shared profile, eliminating the 300-VPC association limit and manual VPC link pipelines.
+  - *Dual-Stack IPAM Management*: Automated allocation via AWS VPC IPAM manages IPv4 supernets and IPv6 GUAs, eliminating subnet calculation errors.
 - **Cost Optimization**:
   - *Centralized VPC Endpoints*: Centralizing high-frequency interface endpoints (SSM, ECR, KMS) saves up to 75% on per-VPC hourly interface charges ($0.01/hr per AZ per endpoint across hundreds of accounts).
   - *TGW Data Processing Trade-off*: Centralized egress incurs $0.02/GB TGW processing plus NAT Gateway charges; acceptable trade-off for zero-trust perimeter inspection and compliance auditability.
@@ -225,13 +234,13 @@ flowchart TB
 ### 4.2 Critical Architectural Risks & Mitigations
 
 #### Risk 1: Asymmetric Routing Packet Drops in Inspection VPC
-- **Failure Mechanism**: AWS Transit Gateway routes return traffic via a different AZ from the forward traffic if Appliance Mode is not active. The stateful AWS Network Firewall or NGFW engine drops the connection mid-handshake because the SYN-ACK packet bypasses the state table.
+- **Failure Mechanism**: AWS Transit Gateway routes return traffic via a different AZ from the forward traffic if Appliance Mode is not active. The stateful AWS Network Firewall drops the connection mid-handshake because the SYN-ACK packet bypasses the state table.
 - **Mitigation Strategy**:
   1. Enforce `appliance_mode_support = "enable"` on all TGW attachments to the Inspection VPC in Terraform.
   2. Implement separate routing tables for inspection ingress and egress to guarantee deterministic symmetrical flow back into the TGW.
 
 #### Risk 2: Route 53 Resolver Throttling during Large-Scale Fleet Spin-Up
-- **Failure Mechanism**: Rapid horizontal autoscaling (e.g., thousands of EKS pods or Lambda invocations) querying centralized Route 53 Inbound/Outbound endpoints can exceed the ENI quota of 10,000 queries per second (QPS) per IP, causing silent DNS timeouts and cascading application outages.
+- **Failure Mechanism**: Rapid horizontal autoscaling querying centralized Route 53 endpoints can exceed the ENI quota of 10,000 QPS per IP, causing silent DNS timeouts.
 - **Mitigation Strategy**:
   1. Deploy NodeLocal DNSCache in EKS clusters to serve 90%+ queries locally without touching VPC resolvers.
-  2. Scale Route 53 Resolver ENIs across at least 4 AZs with auto-monitoring alarms on `ResolverQueryRateExceeded` metrics in CloudWatch.
+  2. Scale Route 53 Resolver ENIs across at least 4 AZs with auto-monitoring alarms on `ResolverQueryRateExceeded` metrics.
