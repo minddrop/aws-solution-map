@@ -1,0 +1,241 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Enterprise AWS Solution Map - Inter-Module SSM Parameter & Contract Schema",
+  "description": "Authoritative contract registry for cross-module dependencies across all 11 capability domains",
+  "type": "object",
+  "properties": {
+    "Domain01_LandingZone_NetworkFabric": {
+      "type": "object",
+      "properties": {
+        "/enterprise/network/tgw/id": {
+          "type": "string",
+          "description": "AWS Transit Gateway ID for Spoke VPC attachments",
+          "pattern": "^tgw-[a-f0-9]+$"
+        },
+        "/enterprise/network/tgw/spoke-rt-id": {
+          "type": "string",
+          "description": "TGW Spoke Route Table ID",
+          "pattern": "^tgw-rtb-[a-f0-9]+$"
+        },
+        "/enterprise/network/dns/inbound-resolver-ips": {
+          "type": "array",
+          "items": { "type": "string", "format": "ipv4" },
+          "description": "IP addresses for Route 53 Inbound Resolver endpoints"
+        },
+        "/enterprise/network/ipam/workload-prod-pool-id": {
+          "type": "string",
+          "description": "IPAM Pool ID for Production Workload VPC allocations"
+        }
+      },
+      "required": [
+        "/enterprise/network/tgw/id",
+        "/enterprise/network/tgw/spoke-rt-id",
+        "/enterprise/network/dns/inbound-resolver-ips",
+        "/enterprise/network/ipam/workload-prod-pool-id"
+      ]
+    },
+    "Domain02_Hybrid_MultiCloud": {
+      "type": "object",
+      "properties": {
+        "/enterprise/hybrid/dxgw/id": {
+          "type": "string",
+          "description": "Direct Connect Gateway Global ID"
+        },
+        "/enterprise/hybrid/cloud-wan/core-network-id": {
+          "type": "string",
+          "description": "AWS Cloud WAN Global Core Network ID"
+        },
+        "/enterprise/hybrid/bgp/asn-aws": {
+          "type": "string",
+          "description": "AWS BGP Autonomous System Number"
+        }
+      },
+      "required": [
+        "/enterprise/hybrid/dxgw/id",
+        "/enterprise/hybrid/cloud-wan/core-network-id",
+        "/enterprise/hybrid/bgp/asn-aws"
+      ]
+    },
+    "Domain03_Identity_KMS_Security": {
+      "type": "object",
+      "properties": {
+        "/enterprise/security/kms/general-data-key-arn": {
+          "type": "string",
+          "description": "Customer Managed Key ARN for general EBS/S3/RDS encryption"
+        },
+        "/enterprise/security/kms/cross-region-dr-key-arn": {
+          "type": "string",
+          "description": "Multi-region KMS CMK ARN for secondary region replication"
+        },
+        "/enterprise/security/oidc/github-actions-role-arn": {
+          "type": "string",
+          "description": "IAM Role ARN for CI/CD OIDC workload federation"
+        }
+      },
+      "required": [
+        "/enterprise/security/kms/general-data-key-arn",
+        "/enterprise/security/kms/cross-region-dr-key-arn",
+        "/enterprise/security/oidc/github-actions-role-arn"
+      ]
+    },
+    "Domain04_Observability_Telemetry": {
+      "type": "object",
+      "properties": {
+        "/enterprise/observability/oam/sink-arn": {
+          "type": "string",
+          "description": "CloudWatch Observability Access Manager (OAM) Sink ARN"
+        },
+        "/enterprise/observability/s3/log-archive-bucket-arn": {
+          "type": "string",
+          "description": "Central Log Archive S3 WORM Compliance Bucket ARN"
+        },
+        "/enterprise/observability/opensearch/endpoint-url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Amazon OpenSearch Service log ingestion HTTPS endpoint"
+        }
+      },
+      "required": [
+        "/enterprise/observability/oam/sink-arn",
+        "/enterprise/observability/s3/log-archive-bucket-arn",
+        "/enterprise/observability/opensearch/endpoint-url"
+      ]
+    },
+    "Domain05_FinOps_CostGovernance": {
+      "type": "object",
+      "properties": {
+        "/enterprise/finops/cur/s3-bucket-arn": {
+          "type": "string",
+          "description": "S3 Bucket ARN for CUR 2.0 Parquet export delivery"
+        },
+        "/enterprise/finops/athena/workgroup-name": {
+          "type": "string",
+          "description": "Athena WorkGroup dedicated to FinOps queries"
+        },
+        "/enterprise/finops/tags/mandatory-tag-keys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Mandatory cost allocation tag keys"
+        }
+      },
+      "required": [
+        "/enterprise/finops/cur/s3-bucket-arn",
+        "/enterprise/finops/athena/workgroup-name",
+        "/enterprise/finops/tags/mandatory-tag-keys"
+      ]
+    },
+    "Domain06_Data_Lakehouse": {
+      "type": "object",
+      "properties": {
+        "/enterprise/data/aurora/proxy-endpoint": {
+          "type": "string",
+          "description": "RDS Proxy read-write connection endpoint"
+        },
+        "/enterprise/data/dynamodb/orders-table-arn": {
+          "type": "string",
+          "description": "Core orders DynamoDB table ARN"
+        },
+        "/enterprise/data/msk/bootstrap-brokers-tls": {
+          "type": "string",
+          "description": "Kafka TLS bootstrap broker connection string"
+        }
+      },
+      "required": [
+        "/enterprise/data/aurora/proxy-endpoint",
+        "/enterprise/data/dynamodb/orders-table-arn",
+        "/enterprise/data/msk/bootstrap-brokers-tls"
+      ]
+    },
+    "Domain07_Compute_Platforms": {
+      "type": "object",
+      "properties": {
+        "/enterprise/compute/eks/cluster-endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "EKS Kubernetes API endpoint URL"
+        },
+        "/enterprise/compute/lattice/service-network-arn": {
+          "type": "string",
+          "description": "Amazon VPC Lattice Service Network ARN"
+        }
+      },
+      "required": [
+        "/enterprise/compute/eks/cluster-endpoint",
+        "/enterprise/compute/lattice/service-network-arn"
+      ]
+    },
+    "Domain08_AppIntegration_Orchestration": {
+      "type": "object",
+      "properties": {
+        "/enterprise/integration/eventbridge/central-bus-arn": {
+          "type": "string",
+          "description": "Central Enterprise EventBus ARN"
+        },
+        "/enterprise/integration/stepfunctions/order-saga-arn": {
+          "type": "string",
+          "description": "Step Functions Saga State Machine ARN"
+        }
+      },
+      "required": [
+        "/enterprise/integration/eventbridge/central-bus-arn",
+        "/enterprise/integration/stepfunctions/order-saga-arn"
+      ]
+    },
+    "Domain09_EdgeSecurity_Routing": {
+      "type": "object",
+      "properties": {
+        "/enterprise/edge/waf/global-webacl-arn": {
+          "type": "string",
+          "description": "Global AWS WAF Web ACL ARN (us-east-1)"
+        },
+        "/enterprise/edge/cloudfront/distribution-id": {
+          "type": "string",
+          "description": "Primary public CloudFront Distribution ID"
+        }
+      },
+      "required": [
+        "/enterprise/edge/waf/global-webacl-arn",
+        "/enterprise/edge/cloudfront/distribution-id"
+      ]
+    },
+    "Domain10_AIML_Inference_Guardrails": {
+      "type": "object",
+      "properties": {
+        "/enterprise/ai/bedrock/guardrail-id": {
+          "type": "string",
+          "description": "Bedrock Guardrail ID enforcing enterprise safety"
+        },
+        "/enterprise/ai/rag/knowledge-base-id": {
+          "type": "string",
+          "description": "Bedrock Knowledge Base ID for document RAG"
+        }
+      },
+      "required": [
+        "/enterprise/ai/bedrock/guardrail-id",
+        "/enterprise/ai/rag/knowledge-base-id"
+      ]
+    },
+    "Domain11_DisasterRecovery_Resilience": {
+      "type": "object",
+      "properties": {
+        "/enterprise/dr/arc/primary-routing-control-arn": {
+          "type": "string",
+          "description": "Route 53 ARC Routing Control ARN for Primary Region"
+        },
+        "/enterprise/dr/arc/secondary-routing-control-arn": {
+          "type": "string",
+          "description": "Route 53 ARC Routing Control ARN for Secondary DR Region"
+        },
+        "/enterprise/dr/backup/central-vault-arn": {
+          "type": "string",
+          "description": "Air-gapped AWS Backup Central Vault ARN"
+        }
+      },
+      "required": [
+        "/enterprise/dr/arc/primary-routing-control-arn",
+        "/enterprise/dr/arc/secondary-routing-control-arn",
+        "/enterprise/dr/backup/central-vault-arn"
+      ]
+    }
+  }
+}
