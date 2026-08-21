@@ -19,8 +19,9 @@ graph TD
     %% Core Foundation Tier
     D01 --> D02
     D01 --> D03
-    D03 --> D04
     D01 --> D04
+    D03 --> D04
+    D01 --> D05
     D03 --> D05
 
     %% Data & Platform Tier
@@ -33,6 +34,7 @@ graph TD
 
     %% Integration & Edge Tier
     D03 --> D08
+    D04 --> D08
     D07 --> D08
     D01 --> D09
     D04 --> D09
@@ -67,5 +69,5 @@ graph TD
 | **07** | Compute & Container Platforms | `terraform-aws-compute-container-platforms` | Domain 01, Domain 03, Domain 04, Domain 06 | EKS API Endpoints, VPC Lattice Service Network ARN, Gateway API Role ARN |
 | **08** | Application Integration & Orchestration | `terraform-aws-application-integration-orchestration` | Domain 03, Domain 04, Domain 07 | Central EventBus ARN, SQS DLQ ARNs, Step Functions ARNs |
 | **09** | Edge Security, Content Delivery & Routing | `terraform-aws-edge-security-routing` | Domain 01, Domain 04, Domain 07 | Global WAF WebACL ARN, CloudFront Distribution ID, Route 53 Zone ID |
-| **10** | AI/ML Inference & Enterprise Guardrails | `terraform-aws-aiml-inference-guardrails` | Domain 01, Domain 03, Domain 06, Domain 07 | Bedrock Guardrail ID/Version, Cross-Region Inference Profile ARN, RAG KB ID |
+| **10** | AI/ML Inference & Enterprise Guardrails | `terraform-aws-aiml-inference-guardrails` | Domain 01, Domain 03, Domain 06, Domain 07, Domain 08 | Bedrock Guardrail ID/Version, Cross-Region Inference Profile ARN, RAG KB ID |
 | **11** | Disaster Recovery & Business Continuity | `terraform-aws-disaster-recovery-resilience` | Domain 01, Domain 03, Domain 06, Domain 07, Domain 09 | ARC 5-Region Cluster Endpoints, ARC Routing Control ARNs, Central Backup Vault ARN |

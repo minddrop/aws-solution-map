@@ -36,6 +36,15 @@ remote_state {
       ManagedBy      = "Terragrunt"
       OrganizationID = local.organization_id
     }
+    dynamodb_table_tags = {
+      Owner          = "PlatformEngineering"
+      Environment    = "Management"
+      BusinessUnit   = "CloudOperations"
+      CostCenter     = "CC-1094"
+      ApplicationID  = "EnterprisePlatform"
+      ManagedBy      = "Terragrunt"
+      OrganizationID = local.organization_id
+    }
   }
 }
 
