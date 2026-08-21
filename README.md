@@ -197,6 +197,38 @@ flowchart TB
 
 ---
 
+## Target Operating Model & Team Topologies
+
+To maximize developer velocity and minimize cognitive load across product squads, platform governance is organized around **Team Topologies**:
+
+```
++---------------------------------------------------------------------------------------------------+
+| Enterprise Platform Team Topology & Domain Ownership                                             |
++---------------------------------------------------------------------------------------------------+
+| 1. Cloud Platform Engineering:                                                                    |
+|    - Owns: Domain 01 (Landing Zone/Network), Domain 02 (Hybrid Transit), Domain 07 (EKS Platforms)|
+|    - Delivers: Golden Path Terragrunt templates, VPC Lattice Gateway API controller configurations|
+|                                                                                                   |
+| 2. Enterprise SecOps & Identity:                                                                 |
+|    - Owns: Domain 03 (Identity/KMS/Security), GuardDuty, Security Hub, WORM Log Archives          |
+|    - Delivers: SCPs/RCPs, Multi-Region KMS CMK policies, OIDC pipeline federations                |
+|                                                                                                   |
+| 3. Enterprise Data & AI Platform:                                                                |
+|    - Owns: Domain 06 (Data Persistence/Lakehouse), Domain 10 (AI/ML & Bedrock Guardrails)         |
+|    - Delivers: Aurora Serverless v2, MSK Tiered Storage, Iceberg Medallion, Bedrock RAG KBs       |
+|                                                                                                   |
+| 4. Site Reliability Engineering (SRE) & Resilience:                                              |
+|    - Owns: Domain 04 (Telemetry/OAM), Domain 08 (Messaging), Domain 11 (Disaster Recovery)       |
+|    - Delivers: Route 53 ARC 5-region quorum, automated DR Step Functions, chaos FIS drills       |
+|                                                                                                   |
+| 5. FinOps & Cloud Economics:                                                                      |
+|    - Owns: Domain 05 (FinOps Cost Governance)                                                     |
+|    - Delivers: CUR 2.0 Athena partition projection, AWS Cost Categories chargeback, Karpenter     |
++---------------------------------------------------------------------------------------------------+
+```
+
+---
+
 ## Verification & Compliance Checklist
 
 - [x] **Zero Hardcoded Static Credentials**: 100% human access via IAM Identity Center (SSO); 100% machine access via OIDC / IAM Roles Anywhere / EKS Pod Identity.
@@ -207,4 +239,6 @@ flowchart TB
 - [x] **WORM Compliance Retention**: S3 Object Lock and AWS Backup Vault Lock in Compliance Mode protecting forensic audit logs and critical backups.
 - [x] **Bedrock Cross-Region Profiles & Generative Guardrails**: Foundation model calls balanced across US regions with mandatory `bedrock:GuardrailIdentifier` scoped to generative LLMs, ensuring RAG Knowledge Base embedding pipelines remain unblocked.
 - [x] **Sub-15 Minute RTO / Sub-1 Minute RPO**: Verified across Aurora Global Database, DynamoDB Global Tables, and AWS Elastic Disaster Recovery (DRS) with bidirectional failback playbooks.
+- [x] **Architecture Review & Remediation Audit**: Complete 9-domain review suite executed with findings logged in `reviews/findings.jsonl` and patched in `reviews/remediation-log.md`.
+
 

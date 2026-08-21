@@ -118,7 +118,7 @@ The Landing Zone & Core Network Fabric publishes authoritative contract state to
 | :--- | :--- | :--- | :--- |
 | `/enterprise/network/tgw/id` | String | All Spoke VPC Repositories | Target TGW ID for Spoke VPC VPC-TGW attachments |
 | `/enterprise/network/tgw/spoke-rt-id` | String | All Spoke VPC Repositories | TGW Route Table to associate spoke attachments with |
-| `/enterprise/network/dns/inbound-resolver-ips` | StringList | Hybrid Network / On-Prem DNS | Target IPs for on-premises DNS forwarding rules (`10.254.0.4,10.254.1.4`) |
+| `/enterprise/network/dns/inbound-resolver-ips` | StringList | Hybrid Network / On-Prem DNS | Target IPs for on-premises DNS forwarding rules (`10.254.0.4,10.254.0.20,10.254.0.36`) |
 | `/enterprise/network/dns/outbound-endpoint-id` | String | Route 53 Rules Manager | Route 53 Outbound Endpoint ID for conditional forwarding |
 | `/enterprise/network/dns/r53-profile-arn` | String | All Spoke Workload Accounts | Route 53 Profile ARN shared across Org via RAM |
 | `/enterprise/network/ipam/workload-prod-pool-id` | String | Workload Prod Account VPCs | IPAM Pool ID for dynamic Spoke CIDR provisioning |
@@ -152,19 +152,19 @@ flowchart TB
                 NFW_AZ_A["AWS Network Firewall (AZ-A)"]
                 NFW_AZ_B["AWS Network Firewall (AZ-B)"]
                 NFW_AZ_C["AWS Network Firewall (AZ-C)"]
-                TGW_Attach_Inspect["TGW Attachment (Inspection - /27)"]
+                TGW_Attach_Inspect["TGW Attachment (Inspection - 3x /28)"]
             end
 
             subgraph Egress_VPC["Central Egress VPC (10.254.32.0/20)"]
                 NAT_GW["NAT Gateways (Multi-AZ)"]
                 IGW["Internet Gateway"]
-                TGW_Attach_Egress["TGW Attachment (Egress - /27)"]
+                TGW_Attach_Egress["TGW Attachment (Egress - 3x /28)"]
             end
 
             subgraph DNS_Hub["Central Route 53 Resolver & Profiles Hub"]
                 R53_Profiles["Route 53 Profiles (RAM Shared Org-wide)"]
-                R53_Inbound["Inbound Resolver Endpoints"]
-                R53_Outbound["Outbound Resolver Endpoints"]
+                R53_Inbound["Inbound Resolver Endpoints (3 AZs)"]
+                R53_Outbound["Outbound Resolver Endpoints (3 AZs)"]
                 DNS_Firewall["Route 53 DNS Firewall"]
             end
         end
@@ -176,20 +176,20 @@ flowchart TB
                 VPCE_S3["S3 Interface / Gateway"]
                 VPCE_KMS["KMS Endpoint"]
             end
-            TGW_Attach_Shared["TGW Attachment (Shared Services)"]
+            TGW_Attach_Shared["TGW Attachment (Shared Services - 3x /28)"]
         end
 
         subgraph Workload_Prod_Account["Workload Prod Account (10.100.0.0/16)"]
             subgraph Prod_Spoke_VPC["Production Spoke VPC"]
                 Prod_App_Subnets["App Subnets (EKS / ECS / RDS)"]
-                TGW_Attach_Prod["TGW Attachment (Prod Spoke - /27)"]
+                TGW_Attach_Prod["TGW Attachment (Prod Spoke - 3x /28)"]
             end
         end
 
         subgraph Workload_NonProd_Account["Workload Non-Prod Account (10.101.0.0/16)"]
             subgraph NonProd_Spoke_VPC["Non-Production Spoke VPC"]
                 NonProd_App_Subnets["App Subnets (Dev / QA)"]
-                TGW_Attach_NonProd["TGW Attachment (Non-Prod Spoke - /27)"]
+                TGW_Attach_NonProd["TGW Attachment (Non-Prod Spoke - 3x /28)"]
             end
         end
 
