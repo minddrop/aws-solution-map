@@ -192,7 +192,7 @@ flowchart TB
 - **Security**:
   - *Comprehensive Data Privacy*: Bedrock guarantees zero customer prompt/completion data is used to train base models. Customer data is encrypted in transit (TLS 1.3) and at rest with Customer Managed KMS Keys.
   - *Automated Prompt Injection & PII Scrubbing*: Bedrock Guardrails intercepts malicious prompts and masks PII before LLM processing.
-  - *IAM Condition Key Enforcement*: Mandates `bedrock:GuardrailIdentifier` in all IAM policies.
+  - *Targeted IAM & SCP Condition Key Enforcement*: Mandates `bedrock:GuardrailIdentifier` for all generative LLMs (Claude, Llama, Titan Text) via SCP, while exempting text embedding models (`amazon.titan-embed-*`) to ensure continuous RAG Knowledge Base indexing.
 - **Reliability**:
   - *Cross-Region Inference Profiles*: Dynamically balances token loads across `us-east-1`, `us-west-2`, and `us-east-2`, mitigating regional quota exhaustion (HTTP 429).
 - **Operational Excellence**:
@@ -214,3 +214,10 @@ flowchart TB
 - **Mitigation Strategy**:
   1. Utilize Amazon Bedrock Cross-Region Inference Profiles (`us.anthropic.claude-3-5-sonnet-20241022-v2:0`).
   2. Implement rate-limiting token bucket queues in SQS for asynchronous batch tasks.
+
+#### Risk 3: OpenSearch Serverless (AOSS) Idle OCU Cost Proliferation
+- **Failure Mechanism**: Creating separate OpenSearch Serverless vector collections per small microservice incurs a baseline charge of 4 OCUs ($700/mo minimum per collection) even with zero query traffic.
+- **Mitigation Strategy**:
+  1. Consolidate enterprise vector embeddings into a shared, centralized Vector Collection in Domain 10 partitioned by tenant index aliases.
+  2. Configure automatic OCU scale-down caps via `aws_opensearchserverless_lifecycle_policy`.
+

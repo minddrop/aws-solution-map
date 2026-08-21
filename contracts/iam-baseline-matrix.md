@@ -47,12 +47,19 @@
         "organizations:*",
         "route53:*",
         "route53profiles:*",
+        "route53-recovery-control-config:*",
+        "route53-recovery-readiness:*",
         "cloudfront:*",
         "shield:*",
         "wafv2:*",
         "support:*",
         "health:*",
-        "aws-portal:*",
+        "account:*",
+        "billing:*",
+        "payments:*",
+        "tax:*",
+        "purchase-orders:*",
+        "aws-marketplace:*",
         "budgets:*"
       ],
       "Resource": "*",
@@ -77,7 +84,7 @@
       "Condition": {
         "StringNotEquals": {
           "aws:PrincipalAccount": [
-            "${var.network_hub_account_id}"
+            "222222222222"
           ]
         }
       }
@@ -85,6 +92,7 @@
   ]
 }
 ```
+*Note: In Terraform automation, dynamic account IDs are populated via `data.aws_iam_policy_document` or `templatefile()` to ensure static JSON compatibility with AWS Organizations.*
 
 ### 2.2 SCP 2: Mandatory Data Encryption & KMS Protection
 ```json
@@ -123,13 +131,18 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DenyUnguardedBedrockInvocations",
+      "Sid": "DenyUnguardedGenerativeModelInvocations",
       "Effect": "Deny",
       "Action": [
         "bedrock:InvokeModel",
         "bedrock:InvokeModelWithResponseStream"
       ],
-      "Resource": "*",
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/anthropic.*",
+        "arn:aws:bedrock:*::foundation-model/meta.*",
+        "arn:aws:bedrock:*::foundation-model/mistral.*",
+        "arn:aws:bedrock:*::foundation-model/amazon.titan-text-*"
+      ],
       "Condition": {
         "Null": {
           "bedrock:GuardrailIdentifier": "true"
@@ -139,8 +152,36 @@
   ]
 }
 ```
+*Note: This SCP explicitly scopes Guardrail enforcement to generative chat/text foundation models, ensuring that embedding models (such as `amazon.titan-embed-text-v1` and `cohere.embed-*`) used by Bedrock Knowledge Bases and vector pipelines are not blocked.*
 
-### 2.4 RCP: Organization Data Perimeter Boundary (Resource Control Policy)
+### 2.4 SCP 4: Core Governance & Security Invariants
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyDisablingSecurityServicesOrLeavingOrg",
+      "Effect": "Deny",
+      "Action": [
+        "organizations:LeaveOrganization",
+        "cloudtrail:StopLogging",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail",
+        "config:DeleteConfigRule",
+        "config:DeleteConfigurationRecorder",
+        "config:StopConfigurationRecorder",
+        "guardduty:DeleteDetector",
+        "guardduty:DisassociateFromMasterAccount",
+        "securityhub:DisableSecurityHub",
+        "securityhub:DisassociateFromMasterAccount"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### 2.5 RCP: Organization Data Perimeter Boundary (Resource Control Policy)
 ```json
 {
   "Version": "2012-10-17",
@@ -167,3 +208,4 @@
   ]
 }
 ```
+

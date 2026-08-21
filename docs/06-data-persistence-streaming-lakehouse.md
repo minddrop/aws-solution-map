@@ -201,3 +201,10 @@ flowchart TB
 - **Mitigation Strategy**:
   1. Schedule automated AWS Glue Iceberg compaction jobs (`CALL system.rewrite_data_files()`) to bin-pack small files into 512MB chunks.
   2. Configure snapshot expiration and orphan file removal in Lake Formation.
+
+#### Risk 3: DynamoDB Global Tables Multi-Region Last-Writer-Wins Data Loss
+- **Failure Mechanism**: In active-active multi-region deployments, concurrent writes to the same item in `us-east-1` and `us-west-2` result in silent overwrite based on the latest physical timestamp without transactional reconciliation.
+- **Mitigation Strategy**:
+  1. Enforce optimistic locking in application models using a monotonic `version` attribute with DynamoDB Condition Expressions (`attribute_not_exists(version) OR version = :current_version`).
+  2. Implement customer/tenant affinity routing at the Edge (CloudFront / Route 53 ARC) to ensure all writes for a given tenant route to a single designated active region.
+

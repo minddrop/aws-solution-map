@@ -39,7 +39,7 @@ remote_state {
   }
 }
 
-# Generate AWS provider configurations with automated cross-account assume-role
+# Generate AWS provider configurations with automated cross-account assume-role and global edge support
 generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
@@ -62,6 +62,7 @@ terraform {
   }
 }
 
+# Primary Regional Provider
 provider "aws" {
   region = "${local.aws_region}"
 
@@ -82,5 +83,29 @@ provider "aws" {
     }
   }
 }
+
+# Global Edge & us-east-1 Aliased Provider (Required for CloudFront ACM, Global WAF, Route 53 ARC)
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  assume_role {
+    role_arn     = "arn:aws:iam::${local.account_id}:role/AWSAccelerator-PipelineOIDC-Role"
+    session_name = "terragrunt-pipeline-${local.account_name}-edge"
+  }
+
+  default_tags {
+    tags = {
+      ApplicationID  = "EnterprisePlatform"
+      Environment    = "${local.account_name}"
+      Owner          = "PlatformEngineering"
+      BusinessUnit   = "CloudOperations"
+      CostCenter     = "CC-1094"
+      ManagedBy      = "Terraform/Terragrunt"
+      OrganizationID = "${local.organization_id}"
+    }
+  }
+}
 EOF
 }
+

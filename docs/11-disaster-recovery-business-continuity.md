@@ -211,3 +211,27 @@ flowchart TB
 - **Mitigation Strategy**:
   1. Implement Route 53 ARC Readiness Checks tracking target region service quotas.
   2. Deploy automated Terraform pipeline syncs requesting matching AWS Service Quotas in all secondary regions.
+
+#### Risk 3: Client DNS Caching Delay During Routing Control Toggles
+- **Failure Mechanism**: Stubborn client resolvers and HTTP client pools ignore TTL (60s), continuing to direct requests to the degraded primary region origin.
+- **Mitigation Strategy**:
+  1. Set DNS record TTL to 10–30 seconds for all ARC-governed DNS alias records.
+  2. Combine Route 53 ARC DNS routing controls with CloudFront Origin Groups configured with automated `5xx` failover to immediately switch origins at the edge regardless of client DNS cache state.
+
+---
+
+## 5. Day-2 Disaster Recovery Playbooks
+
+### Playbook 3: Orderly Post-Incident Regional Failback Protocol (US-West-2 to US-East-1)
+1. **Prerequisite**: Primary region (`us-east-1`) infrastructure, network fabric, and AWS services are declared fully operational and stable by AWS Health / SRE on-call.
+2. **Execution Steps**:
+   - **Step 1 (Reverse Replication Baseline)**: Configure the recovered `us-east-1` Aurora PostgreSQL cluster as a read-only secondary replica of the active `us-west-2` primary cluster:
+     ```bash
+     aws rds create-db-cluster \
+       --db-cluster-identifier enterprise-aurora-primary-cluster \
+       --replication-source-identifier arn:aws:rds:us-west-2:111111111111:cluster:enterprise-aurora-secondary-cluster \
+       --engine aurora-postgresql
+     ```
+   - **Step 2 (Data Catch-Up Verification)**: Monitor CloudWatch metric `AuroraGlobalDBReplicationLag` from `us-west-2` to `us-east-1` until lag $< 500\text{ ms}$.
+   - **Step 3 (Traffic Flip & Controlled Cutback)**: Execute the Route 53 ARC Step Functions state machine during a scheduled maintenance window to flip traffic back to `us-east-1`, promote `us-east-1` to writer, and demote `us-west-2` to secondary replica.
+

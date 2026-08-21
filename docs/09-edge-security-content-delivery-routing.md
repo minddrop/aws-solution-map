@@ -171,7 +171,7 @@ flowchart TB
 
 ### 4.1 Well-Architected Assessment
 - **Security**:
-  - *Origin Cloaking via Prefix Lists & OAC*: Origin Load Balancers accept connections exclusively from the AWS CloudFront Managed Prefix List (`pl-cloudfront-origin`). OAC signs requests with SigV4, entirely blocking direct IP bypass attacks.
+  - *Origin Cloaking & Defense-in-Depth*: Origin Load Balancers enforce a dual-layer perimeter: Security Groups restrict ingress solely to the AWS CloudFront Managed Prefix List (`pl-cloudfront-origin`), while regional AWS WAF on the ALB validates a cryptographically rotated custom secret header (`X-Origin-Verify`) or SigV4 signature, entirely blocking direct IP/DNS bypass attacks from other AWS accounts.
   - *Intelligent Bot Control*: WAF Bot Control detects automated scrapers and credential stuffing at the edge.
 - **Reliability**:
   - *Origin Group High-Availability Failover*: CloudFront Origin Groups automatically switch to the secondary DR region origin on `5xx` error codes.
@@ -194,3 +194,10 @@ flowchart TB
 - **Mitigation Strategy**:
   1. Enforce strict CloudFront Cache Policies forwarding only explicitly allowed headers to the cache key.
   2. Strip untrusted client headers at the edge using CloudFront Functions.
+
+#### Risk 3: Origin Load Balancer Bypass via Shared CloudFront Prefix List
+- **Failure Mechanism**: Because the AWS CloudFront Managed Prefix List (`pl-cloudfront-origin`) includes IP ranges used by all AWS CloudFront distributions globally, an external actor could spin up an arbitrary CloudFront distribution and target the ALB's public IP/DNS directly.
+- **Mitigation Strategy**:
+  1. Inject an automated high-entropy secret header (`X-Origin-Verify`) in CloudFront origin custom headers.
+  2. Enforce an AWS WAF rule on the regional ALB that blocks any request lacking the exact matching `X-Origin-Verify` token.
+

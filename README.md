@@ -188,14 +188,23 @@ flowchart TB
    - Automation script attaches an inline `DenyAllBeforeTimestamp` IAM policy to the affected role, terminating all active temporary sessions immediately.
    - PagerDuty notification is broadcast to SOC channel with root-cause principal ID and source IP.
 
+### Playbook 3: Orderly Post-Incident Regional Failback Protocol (US-West-2 to US-East-1)
+1. **Trigger Condition**: Primary region (`us-east-1`) infrastructure declared fully restored and healthy.
+2. **Execution Steps**:
+   - Establish recovered `us-east-1` cluster as a read-only replica of active `us-west-2` primary.
+   - Monitor `AuroraGlobalDBReplicationLag` until lag $< 500\text{ ms}$.
+   - Execute Route 53 ARC Step Functions state machine to flip traffic back to `us-east-1`, promote `us-east-1` to writer, and demote `us-west-2` to secondary.
+
 ---
 
 ## Verification & Compliance Checklist
 
 - [x] **Zero Hardcoded Static Credentials**: 100% human access via IAM Identity Center (SSO); 100% machine access via OIDC / IAM Roles Anywhere / EKS Pod Identity.
-- [x] **No Spoke Direct Internet Gateways**: All egress forced through centralized AWS Network Firewall cluster with Suricata IPS inspection.
+- [x] **No Spoke Direct Internet Gateways**: All egress forced through centralized AWS Network Firewall cluster with Suricata IPS inspection and direct return egress routing (`Egress-RT`).
 - [x] **Route 53 Profiles DNS Standard**: Organization-wide private DNS, resolver rules, and DNS Firewall managed via RAM without PHZ association limits.
 - [x] **Envelope Encryption Standard**: All storage engines (EBS, S3, RDS, DynamoDB, Secrets Manager) encrypted with Customer Managed Keys (CMKs) in AWS KMS with synchronized multi-region replica policies.
+- [x] **Zero TGW Data Waste on Bulk Storage**: Free local S3 and DynamoDB Gateway VPC Endpoints provisioned in all spoke VPC subnet route tables.
 - [x] **WORM Compliance Retention**: S3 Object Lock and AWS Backup Vault Lock in Compliance Mode protecting forensic audit logs and critical backups.
-- [x] **Bedrock Cross-Region Profiles & Guardrails**: Foundation model calls balanced across US regions with mandatory `bedrock:GuardrailIdentifier` IAM condition keys.
-- [x] **Sub-15 Minute RTO / Sub-1 Minute RPO**: Verified across Aurora Global Database, DynamoDB Global Tables, and AWS Elastic Disaster Recovery (DRS).
+- [x] **Bedrock Cross-Region Profiles & Generative Guardrails**: Foundation model calls balanced across US regions with mandatory `bedrock:GuardrailIdentifier` scoped to generative LLMs, ensuring RAG Knowledge Base embedding pipelines remain unblocked.
+- [x] **Sub-15 Minute RTO / Sub-1 Minute RPO**: Verified across Aurora Global Database, DynamoDB Global Tables, and AWS Elastic Disaster Recovery (DRS) with bidirectional failback playbooks.
+

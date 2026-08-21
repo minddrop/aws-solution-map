@@ -35,13 +35,13 @@
 | **Inspection VPC (NFW Endpoints)** | `10.254.16.32/27` | `/64` per AZ | AZ-A, AZ-B, AZ-C | `rtb-nfw-inspection` |
 | **Central Egress VPC (NAT Gateways)** | `10.254.32.0/24` | `/64` per AZ | AZ-A, AZ-B, AZ-C | `rtb-egress-public-igw` |
 | **Central Egress VPC (TGW Attachment)** | `10.254.33.0/27` | `/64` per AZ | AZ-A, AZ-B, AZ-C | `rtb-egress-tgw-attach` |
-| **Route 53 Inbound Resolver Endpoints** | `10.254.0.0/26` | `/64` per AZ | AZ-A (`10.254.0.4`), AZ-B (`10.254.0.68`) | `rtb-dns-resolver` |
-| **Route 53 Outbound Resolver Endpoints**| `10.254.0.64/26`| `/64` per AZ | AZ-A (`10.254.0.132`), AZ-B (`10.254.0.196`)| `rtb-dns-resolver` |
+| **Route 53 Inbound Resolver Endpoints** | `10.254.0.0/26` | `/64` per AZ | AZ-A (`10.254.0.4`), AZ-B (`10.254.0.36`) | `rtb-dns-resolver` |
+| **Route 53 Outbound Resolver Endpoints**| `10.254.0.64/26`| `/64` per AZ | AZ-A (`10.254.0.68`), AZ-B (`10.254.0.100`)| `rtb-dns-resolver` |
 
 ### 2.2 Shared Services Account (10.253.0.0/16)
 | Subnet / VPC Function | IPv4 CIDR Block | IPv6 Block | AZ Distribution | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **Central Interface VPC Endpoints** | `10.253.1.0/24` | `/64` per AZ | Multi-AZ (3 AZs) | SSM, KMS, ECR, S3 Interface Endpoints |
+| **Central Interface VPC Endpoints** | `10.253.1.0/24` | `/64` per AZ | Multi-AZ (3 AZs) | SSM, KMS, ECR, S3 Interface (Hybrid only) |
 | **Shared CI/CD Runners & Vault** | `10.253.10.0/23` | `/64` per AZ | Multi-AZ (3 AZs) | Self-hosted GitHub runners, SonarQube |
 
 ### 2.3 Production Workload Spoke VPC (10.100.0.0/16)
@@ -51,6 +51,8 @@
 | **Public / Ingress Load Balancer Subnets** | `10.100.1.0/24` | `/64` per AZ | AZ-A, AZ-B, AZ-C | Application Load Balancers (Ingress from Edge) |
 | **Application Compute Subnets (EKS/ECS)** | `10.100.16.0/20` | `/64` per AZ | AZ-A, AZ-B, AZ-C | EKS Worker Nodes, Fargate Tasks, Karpenter Pods |
 | **Database & Persistence Subnets** | `10.100.32.0/21` | `/64` per AZ | AZ-A, AZ-B, AZ-C | Aurora Serverless v2, ElastiCache Redis, RDS Proxy |
+
+*Note: All Spoke VPCs configure free local **S3 and DynamoDB Gateway VPC Endpoints** in their local subnet route tables. High-throughput lakehouse and object storage traffic never crosses the Transit Gateway.*
 
 ---
 
@@ -81,6 +83,8 @@
 | Post-Inspection-RT| NFW Egress Return                       | Spoke VPCs, Shared Svcs  | 0.0.0.0/0 -> Egress VPC       |
 |                   |                                         | DX Gateway, Cloud WAN    |                               |
 +-------------------+-----------------------------------------+--------------------------+-------------------------------+
-| Egress-RT         | Egress VPC Attachment                   | None                     | 10.0.0.0/8 -> Inspection VPC  |
+| Egress-RT         | Egress VPC Attachment                   | Spoke VPCs, Shared Svcs  | None (Direct Return to Spokes)|
 +-------------------+-----------------------------------------+--------------------------+-------------------------------+
 ```
+*Note: Return internet traffic from the Central Egress VPC is propagated directly to Spoke VPC attachments via `Egress-RT`, preventing circular re-inspection in NFW and eliminating asymmetric state drops.*
+

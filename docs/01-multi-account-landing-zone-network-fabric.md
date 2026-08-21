@@ -206,6 +206,10 @@ flowchart TB
     TGW_PostInspect_RT -->|Internet Bound| TGW_Attach_Egress
     TGW_Attach_Egress --> NAT_GW --> IGW
     
+    %% Return Internet Traffic direct to Spokes (Egress-RT)
+    NAT_GW -.->|Return Egress Stream| TGW_Attach_Egress
+    TGW_Attach_Egress -.->|Direct Propagated Route| TGW_Attach_Prod
+    
     TGW_PostInspect_RT -->|East-West Bound| TGW_Attach_NonProd & TGW_Attach_Shared
     
     Prod_App_Subnets -.->|Private DNS Query via Profile| R53_Profiles
@@ -229,7 +233,8 @@ flowchart TB
   - *Dual-Stack IPAM Management*: Automated allocation via AWS VPC IPAM manages IPv4 supernets and IPv6 GUAs, eliminating subnet calculation errors.
 - **Cost Optimization**:
   - *Centralized VPC Endpoints*: Centralizing high-frequency interface endpoints (SSM, ECR, KMS) saves up to 75% on per-VPC hourly interface charges ($0.01/hr per AZ per endpoint across hundreds of accounts).
-  - *TGW Data Processing Trade-off*: Centralized egress incurs $0.02/GB TGW processing plus NAT Gateway charges; acceptable trade-off for zero-trust perimeter inspection and compliance auditability.
+  - *Local S3 & DynamoDB Gateway Endpoints*: Spoke VPCs provision free local Gateway Endpoints in their subnet route tables, bypassing TGW data transfer fees ($0.02/GB) for bulk lakehouse and object storage traffic.
+  - *TGW Data Processing Trade-off*: Centralized egress incurs $0.02/GB TGW processing plus NAT Gateway charges; return egress routes directly to Spoke VPCs via `Egress-RT` propagations, eliminating double-processing fees.
 
 ### 4.2 Critical Architectural Risks & Mitigations
 
@@ -238,9 +243,11 @@ flowchart TB
 - **Mitigation Strategy**:
   1. Enforce `appliance_mode_support = "enable"` on all TGW attachments to the Inspection VPC in Terraform.
   2. Implement separate routing tables for inspection ingress and egress to guarantee deterministic symmetrical flow back into the TGW.
+  3. Ensure `Egress-RT` propagates Spoke VPCs directly to prevent circular re-inspection loops on return internet responses.
 
 #### Risk 2: Route 53 Resolver Throttling during Large-Scale Fleet Spin-Up
 - **Failure Mechanism**: Rapid horizontal autoscaling querying centralized Route 53 endpoints can exceed the ENI quota of 10,000 QPS per IP, causing silent DNS timeouts.
 - **Mitigation Strategy**:
   1. Deploy NodeLocal DNSCache in EKS clusters to serve 90%+ queries locally without touching VPC resolvers.
   2. Scale Route 53 Resolver ENIs across at least 4 AZs with auto-monitoring alarms on `ResolverQueryRateExceeded` metrics.
+
