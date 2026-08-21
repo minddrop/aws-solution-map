@@ -25,9 +25,9 @@
 | :--- | :--- | :--- | :--- |
 | `AWSAccelerator-SecurityAdminRole` | IAM Identity Center / SecOps SSO Group | Full SecOps & Security Hub / KMS Key Admin | `aws:MultiFactorAuthPresent: true`, `aws:PrincipalOrgID` |
 | `AWSAccelerator-NetworkAdminRole` | IAM Identity Center / Network SSO Group | TGW, Direct Connect, Cloud WAN, Route 53 Profiles | `aws:PrincipalOrgID`, `aws:RequestedRegion: [us-east-1, us-west-2]` |
-| `AWSAccelerator-PipelineOIDC-Role` | GitHub Actions (`token.actions.githubusercontent.com`) | Terraform IaC Plan & Apply | `token.actions.githubusercontent.com:sub: repo:enterprise/*` |
+| `AWSAccelerator-PipelineOIDC-Role` | GitHub Actions (`token.actions.githubusercontent.com`) | Terraform IaC Plan & Apply | `token.actions.githubusercontent.com:sub: repo:enterprise/terraform-aws-*:ref:refs/heads/main` |
 | `EKSPodIdentity-AppRole` | `pods.eks.amazonaws.com` (Pod Identity Agent) | S3, DynamoDB, Bedrock, RDS Connect | `aws:SourceAccount`, `aws:SourceArn: arn:aws:eks:*:*:podidentityassociation/*` |
-| `AWSBackup-AirGappedServiceRole` | `backup.amazonaws.com` | Backup cross-account copy, restore | `aws:PrincipalAccount: <BackupVaultAccountID>` |
+| `AWSBackup-AirGappedServiceRole` | `backup.amazonaws.com` | Backup cross-account copy, restore | `aws:PrincipalAccount: "${local.backup_vault_account_id}"` |
 | `VPCLattice-GatewayAPIControllerRole` | `pods.eks.amazonaws.com` | VPC Lattice Service & Target Group management | `aws:SourceAccount`, `aws:PrincipalOrgID` |
 
 ---
@@ -141,7 +141,9 @@
         "arn:aws:bedrock:*::foundation-model/anthropic.*",
         "arn:aws:bedrock:*::foundation-model/meta.*",
         "arn:aws:bedrock:*::foundation-model/mistral.*",
-        "arn:aws:bedrock:*::foundation-model/amazon.titan-text-*"
+        "arn:aws:bedrock:*::foundation-model/amazon.titan-text-*",
+        "arn:aws:bedrock:*:*:inference-profile/us.anthropic.*",
+        "arn:aws:bedrock:*:*:inference-profile/us.meta.*"
       ],
       "Condition": {
         "Null": {
